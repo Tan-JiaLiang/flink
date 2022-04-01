@@ -129,6 +129,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.calcite.jdbc.CalciteSchemaBuilder.asRootSchema;
+import static org.apache.flink.table.api.Expressions.$;
 import static org.apache.flink.table.planner.utils.OperationMatchers.entry;
 import static org.apache.flink.table.planner.utils.OperationMatchers.isCreateTableOperation;
 import static org.apache.flink.table.planner.utils.OperationMatchers.partitionedBy;
@@ -1259,6 +1260,121 @@ public class SqlToOperationConverterTest {
     }
 
     @Test
+    public void testAlterTableRenameColumn() throws Exception {
+        prepareTable("tb1", false, false, true, 3);
+        // rename pk column c
+        Operation operation = parse("alter table tb1 rename c to c1");
+        assertThat(operation).isInstanceOf(AlterTableSchemaOperation.class);
+        assertThat(((AlterTableSchemaOperation) operation).getCatalogTable().getUnresolvedSchema())
+                .isEqualTo(
+                        Schema.newBuilder()
+                                .column("a", DataTypes.INT().notNull())
+                                .column("b", DataTypes.BIGINT().notNull())
+                                .column("c1", DataTypes.STRING().notNull())
+                                .withComment("column comment")
+                                .columnByExpression("d", "a*(b+2 + a*b)")
+                                .column(
+                                        "e",
+                                        DataTypes.ROW(
+                                                DataTypes.STRING(),
+                                                DataTypes.INT(),
+                                                DataTypes.ROW(
+                                                        DataTypes.DOUBLE(),
+                                                        DataTypes.ARRAY(DataTypes.FLOAT()))))
+                                .columnByExpression("f", "e.f1 + e.f2.f0")
+                                .columnByMetadata("g", DataTypes.STRING(), null, true)
+                                .column("ts", DataTypes.TIMESTAMP(3))
+                                .withComment("just a comment")
+                                .watermark("ts", "ts - interval '5' seconds")
+                                .primaryKeyNamed("ct1", "a", "b", "c1")
+                                .build());
+
+        // rename computed column
+        operation = parse("alter table tb1 rename f to f1");
+        assertThat(operation).isInstanceOf(AlterTableSchemaOperation.class);
+        assertThat(((AlterTableSchemaOperation) operation).getCatalogTable().getUnresolvedSchema())
+                .isEqualTo(
+                        Schema.newBuilder()
+                                .column("a", DataTypes.INT().notNull())
+                                .column("b", DataTypes.BIGINT().notNull())
+                                .column("c", DataTypes.STRING().notNull())
+                                .withComment("column comment")
+                                .columnByExpression("d", "a*(b+2 + a*b)")
+                                .column(
+                                        "e",
+                                        DataTypes.ROW(
+                                                DataTypes.STRING(),
+                                                DataTypes.INT(),
+                                                DataTypes.ROW(
+                                                        DataTypes.DOUBLE(),
+                                                        DataTypes.ARRAY(DataTypes.FLOAT()))))
+                                .columnByExpression("f1", "e.f1 + e.f2.f0")
+                                .columnByMetadata("g", DataTypes.STRING(), null, true)
+                                .column("ts", DataTypes.TIMESTAMP(3))
+                                .withComment("just a comment")
+                                .watermark("ts", "ts - interval '5' seconds")
+                                .primaryKeyNamed("ct1", "a", "b", "c")
+                                .build());
+
+        // rename column c that is used in a computed column
+        assertThatThrownBy(() -> parse("alter table tb1 rename a to a1"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "Old column a is referred by computed column `d` BIGINT NOT NULL AS a*(b+2 + a*b), "
+                                + "currently doesn't allow to rename column which is referred by computed column.");
+
+        // rename column used in the watermark expression
+        assertThatThrownBy(() -> parse("alter table tb1 rename ts to ts1"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "Old column ts is referred by watermark expression WATERMARK FOR `ts`: TIMESTAMP(3) AS ts - interval '5' seconds, "
+                                + "currently doesn't allow to rename column which is referred by watermark expression.");
+
+        // rename nested column
+        assertThatThrownBy(() -> parse("alter table tb1 rename e.f1 to e.f11"))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessageContaining("Alter nested row type e.f1 is not supported yet.");
+
+        // rename column with duplicate name
+        assertThatThrownBy(() -> parse("alter table tb1 rename c to a"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "New column a already existed in table schema for RENAME COLUMN");
+
+        // rename column e test computed column expression is ApiExpression which doesn't implement
+        // the equals method
+        CatalogTable catalogTable2 =
+                CatalogTable.of(
+                        Schema.newBuilder()
+                                .column("a", DataTypes.STRING().notNull())
+                                .column("b", DataTypes.INT().notNull())
+                                .column("e", DataTypes.STRING())
+                                .columnByExpression("j", $("e").upperCase())
+                                .columnByExpression("g", "TO_TIMESTAMP(e)")
+                                .primaryKey("a", "b")
+                                .build(),
+                        "tb2",
+                        Collections.singletonList("a"),
+                        Collections.emptyMap());
+        catalogManager
+                .getCatalog("cat1")
+                .get()
+                .createTable(new ObjectPath("db1", "tb2"), catalogTable2, true);
+
+        assertThatThrownBy(() -> parse("alter table `cat1`.`db1`.`tb2` rename e to e1"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "Old column e is referred by computed column `j` STRING AS upper(e), currently doesn't "
+                                + "allow to rename column which is referred by computed column.");
+
+        // rename column used as partition key
+        assertThatThrownBy(() -> parse("alter table tb2 rename a to a1"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(
+                        "Can not rename column a because it is used as the partition keys");
+    }
+
+    @Test
     public void testAlterTableDropConstraint() throws Exception {
         prepareNonManagedTable(true);
         // Test alter table add enforced
@@ -1386,9 +1502,7 @@ public class SqlToOperationConverterTest {
         // add an inner field to a nested row
         assertThatThrownBy(() -> parse("alter table tb1 add (e.f3 string)"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Failed to execute ALTER TABLE statement.\n"
-                                + "Alter nested row type is not supported yet.");
+                .hasMessageContaining("Alter nested row type e.f3 is not supported yet.");
 
         // refer to a nested inner field
         assertThatThrownBy(() -> parse("alter table tb1 add (x string after e.f2)"))
@@ -1399,9 +1513,7 @@ public class SqlToOperationConverterTest {
 
         assertThatThrownBy(() -> parse("alter table tb1 add (e.f3 string after e.f1)"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Failed to execute ALTER TABLE statement.\n"
-                                + "Alter nested row type is not supported yet.");
+                .hasMessageContaining("Alter nested row type e.f3 is not supported yet.");
     }
 
     @Test
@@ -1420,7 +1532,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1454,7 +1566,7 @@ public class SqlToOperationConverterTest {
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
                                 + "  `i` AS [`b` * 2],\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1473,7 +1585,8 @@ public class SqlToOperationConverterTest {
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
                         .columnByExpression("i", new SqlCallExpression("`b` * 2"))
-                        .column("c", DataTypes.STRING())
+                        .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .column(
                                 "e",
@@ -1504,7 +1617,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1639,7 +1752,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1661,7 +1774,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1686,7 +1799,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1710,7 +1823,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1789,7 +1902,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1810,7 +1923,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1839,7 +1952,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1869,7 +1982,7 @@ public class SqlToOperationConverterTest {
                         "ALTER TABLE cat1.db1.tb1 SET SCHEMA (\n"
                                 + "  `a` INT NOT NULL,\n"
                                 + "  `b` BIGINT NOT NULL,\n"
-                                + "  `c` STRING,\n"
+                                + "  `c` STRING NOT NULL COMMENT 'column comment',\n"
                                 + "  `d` AS [a*(b+2 + a*b)],\n"
                                 + "  `e` ROW<`f0` STRING, `f1` INT, `f2` ROW<`f0` DOUBLE, `f1` ARRAY<FLOAT>>>,\n"
                                 + "  `f` AS [e.f1 + e.f2.f0],\n"
@@ -1960,9 +2073,7 @@ public class SqlToOperationConverterTest {
         // modify an inner field to a nested row
         assertThatThrownBy(() -> parse("alter table tb2 modify (e.f0 string)"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Failed to execute ALTER TABLE statement.\n"
-                                + "Alter nested row type is not supported yet.");
+                .hasMessageContaining("Alter nested row type e.f0 is not supported yet.");
 
         // refer to a nested inner field
         assertThatThrownBy(() -> parse("alter table tb2 modify (g string after e.f2)"))
@@ -1973,9 +2084,7 @@ public class SqlToOperationConverterTest {
 
         assertThatThrownBy(() -> parse("alter table tb2 modify (e.f0 string after e.f1)"))
                 .isInstanceOf(UnsupportedOperationException.class)
-                .hasMessageContaining(
-                        "Failed to execute ALTER TABLE statement.\n"
-                                + "Alter nested row type is not supported yet.");
+                .hasMessageContaining("Alter nested row type e.f0 is not supported yet.");
     }
 
     @Test
@@ -1995,7 +2104,8 @@ public class SqlToOperationConverterTest {
                         .column("b", DataTypes.BIGINT().notNull())
                         .withComment("move b to first and add comment")
                         .column("a", DataTypes.INT().notNull())
-                        .column("c", DataTypes.STRING())
+                        .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .column(
                                 "e",
@@ -2020,7 +2130,8 @@ public class SqlToOperationConverterTest {
                 Schema.newBuilder()
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
-                        .column("c", DataTypes.STRING())
+                        .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .column(
                                 "e",
@@ -2053,6 +2164,7 @@ public class SqlToOperationConverterTest {
                 tableIdentifier,
                 Schema.newBuilder()
                         .column("c", DataTypes.BIGINT())
+                        .withComment("column comment")
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
                         .columnByExpression("d", "`a` + 2")
@@ -2087,7 +2199,8 @@ public class SqlToOperationConverterTest {
                         .withComment("change g")
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
-                        .column("c", DataTypes.STRING())
+                        .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .columnByMetadata("e", DataTypes.INT(), null, true)
                         .column("f", DataTypes.TIMESTAMP(3).notNull())
@@ -2173,6 +2286,7 @@ public class SqlToOperationConverterTest {
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
                         .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .column(
                                 "e",
@@ -2656,7 +2770,8 @@ public class SqlToOperationConverterTest {
                 Schema.newBuilder()
                         .column("a", DataTypes.INT().notNull())
                         .column("b", DataTypes.BIGINT().notNull())
-                        .column("c", DataTypes.STRING())
+                        .column("c", DataTypes.STRING().notNull())
+                        .withComment("column comment")
                         .columnByExpression("d", "a*(b+2 + a*b)")
                         .column(
                                 "e",
@@ -2675,10 +2790,17 @@ public class SqlToOperationConverterTest {
         if (!managedTable) {
             options.put("connector", "dummy");
         }
-        if (numOfPkFields == 1) {
+        if (numOfPkFields == 0) {
+            // do nothing
+        } else if (numOfPkFields == 1) {
             builder.primaryKeyNamed("ct1", "a");
         } else if (numOfPkFields == 2) {
             builder.primaryKeyNamed("ct1", "a", "b");
+        } else if (numOfPkFields == 3) {
+            builder.primaryKeyNamed("ct1", "a", "b", "c");
+        } else {
+            throw new IllegalArgumentException(
+                    String.format("Don't support to set pk with %s fields.", numOfPkFields));
         }
 
         if (hasWatermark) {
