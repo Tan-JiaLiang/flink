@@ -414,7 +414,7 @@ public class SqlToOperationConverter {
                             "View %s doesn't exist or is a temporary view.",
                             viewIdentifier.toString()));
         }
-        CatalogBaseTable baseTable = optionalCatalogTable.get().getTable();
+        CatalogBaseTable baseTable = optionalCatalogTable.get().getResolvedTable();
         if (baseTable instanceof CatalogTable) {
             throw new ValidationException("ALTER VIEW for a table is not allowed");
         }
@@ -471,7 +471,7 @@ public class SqlToOperationConverter {
                     String.format(
                             "Table %s doesn't exist or is a temporary table.", tableIdentifier));
         }
-        CatalogBaseTable baseTable = optionalCatalogTable.get().getTable();
+        CatalogBaseTable baseTable = optionalCatalogTable.get().getResolvedTable();
         if (baseTable instanceof CatalogView) {
             throw new ValidationException("ALTER TABLE for a view is not allowed");
         }
@@ -1285,7 +1285,7 @@ public class SqlToOperationConverter {
                     String.format(
                             "Table %s doesn't exist or is a temporary table.", tableIdentifier));
         }
-        CatalogBaseTable baseTable = optionalCatalogTable.get().getTable();
+        CatalogBaseTable baseTable = optionalCatalogTable.get().getResolvedTable();
         if (baseTable instanceof CatalogView) {
             throw new ValidationException("ANALYZE TABLE for a view is not allowed.");
         }
