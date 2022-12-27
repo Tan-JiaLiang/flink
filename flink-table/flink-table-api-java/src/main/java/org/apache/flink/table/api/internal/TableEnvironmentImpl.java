@@ -122,6 +122,7 @@ import org.apache.flink.table.operations.ddl.AddPartitionsOperation;
 import org.apache.flink.table.operations.ddl.AlterCatalogFunctionOperation;
 import org.apache.flink.table.operations.ddl.AlterDatabaseOperation;
 import org.apache.flink.table.operations.ddl.AlterPartitionPropertiesOperation;
+import org.apache.flink.table.operations.ddl.AlterTableChangeOperation;
 import org.apache.flink.table.operations.ddl.AlterTableDropConstraintOperation;
 import org.apache.flink.table.operations.ddl.AlterTableOperation;
 import org.apache.flink.table.operations.ddl.AlterTableOptionsOperation;
@@ -1016,6 +1017,14 @@ public class TableEnvironmentImpl implements TableEnvironmentInternal {
                     for (CatalogPartitionSpec spec : dropPartitionsOperation.getPartitionSpecs()) {
                         catalog.dropPartition(tablePath, spec, ifExists);
                     }
+                } else if (alterTableOperation instanceof AlterTableChangeOperation) {
+                    AlterTableChangeOperation alterTableChangeOperation =
+                            (AlterTableChangeOperation) alterTableOperation;
+                    catalogManager.alterTable(
+                            alterTableChangeOperation.getNewTable(),
+                            alterTableChangeOperation.getTableChanges(),
+                            alterTableChangeOperation.getTableIdentifier(),
+                            false);
                 }
                 return TableResultImpl.TABLE_RESULT_OK;
             } catch (TableAlreadyExistException | TableNotExistException e) {
