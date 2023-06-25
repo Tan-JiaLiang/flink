@@ -55,6 +55,7 @@ import org.apache.flink.table.plan.stats.TableStats;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.utils.PartitionPathUtils;
 
+import org.apache.commons.lang3.time.DurationFormatUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,7 +126,9 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext scanContext) {
         // When this table has no partition, just return an empty source.
-        if (!partitionKeys.isEmpty() && getOrFetchPartitions().isEmpty()) {
+        if (!partitionKeys.isEmpty() &&
+                remainingPartitions != null &&
+                remainingPartitions.isEmpty()) {
             return InputFormatProvider.of(new CollectionInputFormat<>(new ArrayList<>(), null));
         }
 
@@ -274,10 +277,10 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     }
 
     private Path[] paths() {
-        if (partitionKeys.isEmpty()) {
+        if (partitionKeys.isEmpty() || remainingPartitions == null) {
             return new Path[] {path};
         } else {
-            return getOrFetchPartitions().stream()
+            return remainingPartitions.stream()
                     .map(FileSystemTableSource.this::toFullLinkedPartSpec)
                     .map(PartitionPathUtils::generatePartitionPath)
                     .map(n -> new Path(path, n))
@@ -310,7 +313,8 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     @Override
     public Optional<List<Map<String, String>>> listPartitions() {
         try {
-            return Optional.of(
+            long startTime = System.currentTimeMillis();
+            Optional<List<Map<String, String>>> result = Optional.of(
                     PartitionPathUtils.searchPartSpecAndPaths(
                                     path.getFileSystem(), path, partitionKeys.size())
                             .stream()
@@ -328,6 +332,11 @@ public class FileSystemTableSource extends AbstractFileSystemTable
                                         return ret;
                                     })
                             .collect(Collectors.toList()));
+            long endTime = System.currentTimeMillis();
+            long cost = endTime - startTime;
+            LOG.info("listPartitions cost {}({}ms)",
+                    DurationFormatUtils.formatDuration(cost, "HH:mm:ss"), cost);
+            return result;
         } catch (Exception e) {
             throw new TableException("Fetch partitions fail.", e);
         }
@@ -346,6 +355,7 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     @Override
     public TableStats reportStatistics() {
         try {
+            long startTime = System.currentTimeMillis();
             // only support BOUNDED source
             Optional<Duration> monitorIntervalOpt =
                     tableOptions.getOptional(FileSystemConnectorOptions.SOURCE_MONITOR_INTERVAL);
@@ -363,6 +373,7 @@ public class FileSystemTableSource extends AbstractFileSystemTable
             List<Path> files =
                     splits.stream().map(FileSourceSplit::path).collect(Collectors.toList());
 
+            TableStats stats = TableStats.UNKNOWN;
             if (bulkReaderFormat instanceof FileBasedStatisticsReportableInputFormat) {
                 TableStats tableStats =
                         ((FileBasedStatisticsReportableInputFormat) bulkReaderFormat)
@@ -370,7 +381,7 @@ public class FileSystemTableSource extends AbstractFileSystemTable
                 if (tableStats.equals(TableStats.UNKNOWN)) {
                     return tableStats;
                 }
-                return limit == null
+                stats = limit == null
                         ? tableStats
                         : new TableStats(Math.min(limit, tableStats.getRowCount()));
             } else if (deserializationFormat instanceof FileBasedStatisticsReportableInputFormat) {
@@ -380,12 +391,15 @@ public class FileSystemTableSource extends AbstractFileSystemTable
                 if (tableStats.equals(TableStats.UNKNOWN)) {
                     return tableStats;
                 }
-                return limit == null
+                stats = limit == null
                         ? tableStats
                         : new TableStats(Math.min(limit, tableStats.getRowCount()));
-            } else {
-                return TableStats.UNKNOWN;
             }
+            long endTime = System.currentTimeMillis();
+            long cost = endTime - startTime;
+            LOG.info("reportStatistics cost {}({}ms)",
+                    DurationFormatUtils.formatDuration(cost, "HH:mm:ss"), cost);
+            return stats;
         } catch (Exception e) {
             LOG.warn(
                     "Reporting statistics failed for file system table source: {}", e.getMessage());
@@ -416,13 +430,6 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     @Override
     public String asSummaryString() {
         return "Filesystem";
-    }
-
-    private List<Map<String, String>> getOrFetchPartitions() {
-        if (remainingPartitions == null) {
-            remainingPartitions = listPartitions().get();
-        }
-        return remainingPartitions;
     }
 
     private LinkedHashMap<String, String> toFullLinkedPartSpec(Map<String, String> part) {
