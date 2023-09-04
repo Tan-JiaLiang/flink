@@ -21,13 +21,17 @@ package org.apache.flink.table.planner.plan.nodes.exec.stream;
 import org.apache.flink.FlinkVersion;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.streaming.api.operators.KeyedProcessOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
+import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
 import org.apache.flink.table.planner.codegen.agg.AggsHandlerCodeGenerator;
 import org.apache.flink.table.planner.delegation.PlannerBase;
+import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
+import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.WindowingStrategy;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
@@ -41,11 +45,13 @@ import org.apache.flink.table.planner.plan.utils.AggregateUtil;
 import org.apache.flink.table.planner.plan.utils.KeySelectorUtil;
 import org.apache.flink.table.planner.utils.JavaScalaConversionUtil;
 import org.apache.flink.table.planner.utils.TableConfigUtils;
+import org.apache.flink.table.runtime.generated.GeneratedAggsHandleFunction;
 import org.apache.flink.table.runtime.generated.GeneratedNamespaceAggsHandleFunction;
 import org.apache.flink.table.runtime.groupwindow.NamedWindowProperty;
 import org.apache.flink.table.runtime.groupwindow.WindowProperty;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.aggregate.window.SlicingWindowAggOperatorBuilder;
+import org.apache.flink.table.runtime.operators.window.SlidingWindowAggregateTableFunctionOperator;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceAssigner;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceSharedAssigner;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -61,11 +67,15 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.tools.RelBuilder;
 
+import java.time.Duration;
 import java.time.ZoneId;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import static org.apache.flink.table.types.logical.utils.LogicalTypeChecks.isRowtimeAttribute;
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
@@ -159,55 +169,128 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
                 TimeWindowUtil.getShiftTimeZone(
                         windowing.getTimeAttributeType(),
                         TableConfigUtils.getLocalTimeZone(config));
-        final SliceAssigner sliceAssigner = createSliceAssigner(windowing, shiftTimeZone);
-
-        // Hopping window requires additional COUNT(*) to determine whether to register next timer
-        // through whether the current fired window is empty, see SliceSharedWindowAggProcessor.
-        final AggregateInfoList aggInfoList =
-                AggregateUtil.deriveStreamWindowAggregateInfoList(
-                        planner.getTypeFactory(),
-                        inputRowType,
-                        JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
-                        windowing.getWindow(),
-                        true); // isStateBackendDataViews
-
-        final GeneratedNamespaceAggsHandleFunction<Long> generatedAggsHandler =
-                createAggsHandler(
-                        sliceAssigner,
-                        aggInfoList,
-                        config,
-                        planner.getFlinkContext().getClassLoader(),
-                        planner.createRelBuilder(),
-                        inputRowType.getChildren(),
-                        shiftTimeZone);
 
         final RowDataKeySelector selector =
                 KeySelectorUtil.getRowDataSelector(
                         planner.getFlinkContext().getClassLoader(),
                         grouping,
                         InternalTypeInfo.of(inputRowType));
-        final LogicalType[] accTypes = convertToLogicalTypes(aggInfoList.getAccTypes());
 
-        final OneInputStreamOperator<RowData, RowData> windowOperator =
-                SlicingWindowAggOperatorBuilder.builder()
-                        .inputSerializer(new RowDataSerializer(inputRowType))
-                        .shiftTimeZone(shiftTimeZone)
-                        .keySerializer(
-                                (PagedTypeSerializer<RowData>)
-                                        selector.getProducedType().toSerializer())
-                        .assigner(sliceAssigner)
-                        .countStarIndex(aggInfoList.getIndexOfCountStar())
-                        .aggregate(generatedAggsHandler, new RowDataSerializer(accTypes))
-                        .build();
+        final OneInputTransformation<RowData, RowData> transform;
+        if (windowing.getWindow() instanceof SlidingWindowSpec) {
+            if (!isRowtimeAttribute(windowing.getTimeAttributeType())) {
+                throw new TableException("SLIDE windows only support ROWTIME time attribute.");
+            }
 
-        final OneInputTransformation<RowData, RowData> transform =
-                ExecNodeUtil.createOneInputTransformation(
-                        inputTransform,
-                        createTransformationMeta(WINDOW_AGGREGATE_TRANSFORMATION, config),
-                        SimpleOperatorFactory.of(windowOperator),
-                        InternalTypeInfo.of(getOutputType()),
-                        inputTransform.getParallelism(),
-                        WINDOW_AGG_MEMORY_RATIO);
+            final List<String> fieldNames = new ArrayList<>(inputRowType.getFieldNames());
+            final List<LogicalType> fieldTypes = new ArrayList<>(inputRowType.getChildren());
+            final RowType aggInputType =
+                    RowType.of(
+                            fieldTypes.toArray(new LogicalType[0]),
+                            fieldNames.toArray(new String[0]));
+
+            boolean[] aggCallNeedRetractions = new boolean[aggCalls.length];
+            Arrays.fill(aggCallNeedRetractions, true);
+
+            AggregateInfoList aggInfoList =
+                    AggregateUtil.transformToStreamAggregateInfoList(
+                            planner.getTypeFactory(),
+                            // use aggInputType which considers constants as input instead of
+                            // inputSchema.relDataType
+                            aggInputType,
+                            JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
+                            aggCallNeedRetractions,
+                            true, // needInputCount,
+                            true, // isStateBackendDataViews
+                            true); // needDistinctInfo
+            final LogicalType[] accTypes = convertToLogicalTypes(aggInfoList.getAccTypes());
+
+            final CodeGeneratorContext ctx =
+                    new CodeGeneratorContext(config, planner.getFlinkContext().getClassLoader());
+            AggsHandlerCodeGenerator generator =
+                    new AggsHandlerCodeGenerator(
+                            ctx,
+                            planner.createRelBuilder(),
+                            JavaScalaConversionUtil.toScala(fieldTypes),
+                            false); // copyInputField
+
+            List<String> windowsProperties = Arrays
+                    .stream(namedWindowProperties)
+                    .map(x -> x.getProperty().getClass().getSimpleName())
+                    .collect(Collectors.toList());
+
+            GeneratedAggsHandleFunction genAggsHandler =
+                    generator
+                            .needRetract()
+                            .needAccumulate()
+                            .generateAggsHandler("SlidingWindowAggsHandler", aggInfoList);
+
+            int rowtimeIdx = ((TimeAttributeWindowingStrategy) windowing).getTimeAttributeIndex();
+            SlidingWindowAggregateTableFunctionOperator operator =
+                    new SlidingWindowAggregateTableFunctionOperator(
+                            ((SlidingWindowSpec) windowing.getWindow()).getSize().toMillis(),
+                            ((SlidingWindowSpec) windowing.getWindow()).getAllowedLateness(),
+                            shiftTimeZone,
+                            genAggsHandler,
+                            accTypes,
+                            fieldTypes.toArray(new LogicalType[]{}),
+                            rowtimeIdx,
+                            windowsProperties
+                    );
+
+            transform =
+                    ExecNodeUtil.createOneInputTransformation(
+                            inputTransform,
+                            createTransformationMeta(WINDOW_AGGREGATE_TRANSFORMATION, config),
+                            new KeyedProcessOperator<>(operator),
+                            InternalTypeInfo.of(getOutputType()),
+                            inputTransform.getParallelism(),
+                            WINDOW_AGG_MEMORY_RATIO);
+        } else {
+            final SliceAssigner sliceAssigner = createSliceAssigner(windowing, shiftTimeZone);
+
+            // Hopping window requires additional COUNT(*) to determine whether to register next timer
+            // through whether the current fired window is empty, see SliceSharedWindowAggProcessor.
+            final AggregateInfoList aggInfoList =
+                    AggregateUtil.deriveStreamWindowAggregateInfoList(
+                            planner.getTypeFactory(),
+                            inputRowType,
+                            JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
+                            windowing.getWindow(),
+                            true); // isStateBackendDataViews
+            final LogicalType[] accTypes = convertToLogicalTypes(aggInfoList.getAccTypes());
+
+            final GeneratedNamespaceAggsHandleFunction<Long> generatedAggsHandler =
+                    createAggsHandler(
+                            sliceAssigner,
+                            aggInfoList,
+                            config,
+                            planner.getFlinkContext().getClassLoader(),
+                            planner.createRelBuilder(),
+                            inputRowType.getChildren(),
+                            shiftTimeZone);
+
+            final OneInputStreamOperator<RowData, RowData> windowOperator =
+                    SlicingWindowAggOperatorBuilder.builder()
+                            .inputSerializer(new RowDataSerializer(inputRowType))
+                            .shiftTimeZone(shiftTimeZone)
+                            .keySerializer(
+                                    (PagedTypeSerializer<RowData>)
+                                            selector.getProducedType().toSerializer())
+                            .assigner(sliceAssigner)
+                            .countStarIndex(aggInfoList.getIndexOfCountStar())
+                            .aggregate(generatedAggsHandler, new RowDataSerializer(accTypes))
+                            .build();
+
+            transform =
+                    ExecNodeUtil.createOneInputTransformation(
+                            inputTransform,
+                            createTransformationMeta(WINDOW_AGGREGATE_TRANSFORMATION, config),
+                            SimpleOperatorFactory.of(windowOperator),
+                            InternalTypeInfo.of(getOutputType()),
+                            inputTransform.getParallelism(),
+                            WINDOW_AGG_MEMORY_RATIO);
+        }
 
         // set KeyType and Selector for state
         transform.setStateKeySelector(selector);

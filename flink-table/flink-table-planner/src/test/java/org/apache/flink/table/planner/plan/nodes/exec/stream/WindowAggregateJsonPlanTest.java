@@ -273,6 +273,55 @@ public class WindowAggregateJsonPlanTest extends TableTestBase {
     }
 
     @Test
+    public void testEventTimeSlideWindow() {
+        tEnv.createFunction("concat_distinct_agg", ConcatDistinctAggFunction.class);
+        String sinkTableDdl =
+                "CREATE TABLE MySink (\n"
+                        + " b BIGINT,\n"
+                        + " window_start TIMESTAMP(3),\n"
+                        + " window_end TIMESTAMP(3),\n"
+                        + " cnt BIGINT,\n"
+                        + " sum_a INT,\n"
+                        + " distinct_cnt BIGINT,\n"
+                        + " concat_distinct STRING\n"
+                        + ") WITH (\n"
+                        + " 'connector' = 'values')\n";
+        tEnv.executeSql(sinkTableDdl);
+        util.verifyJsonPlan(
+                "insert into MySink select\n"
+                        + "  b,\n"
+                        + "  window_start,\n"
+                        + "  window_end,\n"
+                        + "  COUNT(*),\n"
+                        + "  SUM(a),\n"
+                        + "  COUNT(DISTINCT c),\n"
+                        + "  concat_distinct_agg(c)\n"
+                        + "FROM TABLE(\n"
+                        + "   SLIDE(TABLE MyTable, DESCRIPTOR(rowtime), INTERVAL '5' SECOND))\n"
+                        + "GROUP BY b, window_start, window_end");
+    }
+
+    @Test
+    public void testProcTimeSlideWindow() {
+        String sinkTableDdl =
+                "CREATE TABLE MySink (\n"
+                        + " b BIGINT,\n"
+                        + " window_end TIMESTAMP(3),\n"
+                        + " cnt BIGINT\n"
+                        + ") WITH (\n"
+                        + " 'connector' = 'values')\n";
+        tEnv.executeSql(sinkTableDdl);
+        util.verifyJsonPlan(
+                "insert into MySink select\n"
+                        + "  b,\n"
+                        + "  window_end,\n"
+                        + "  COUNT(*)\n"
+                        + "FROM TABLE(\n"
+                        + "   SLIDE(TABLE MyTable, DESCRIPTOR(proctime), INTERVAL '15' MINUTE))\n"
+                        + "GROUP BY b, window_start, window_end");
+    }
+
+    @Test
     public void testDistinctSplitEnabled() {
         tEnv.getConfig()
                 .set(OptimizerConfigOptions.TABLE_OPTIMIZER_DISTINCT_AGG_SPLIT_ENABLED, true);

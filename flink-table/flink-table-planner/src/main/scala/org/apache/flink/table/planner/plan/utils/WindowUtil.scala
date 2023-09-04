@@ -17,8 +17,17 @@
  */
 package org.apache.flink.table.planner.plan.utils
 
+import java.time.Duration
+import java.util.Collections
+
+import org.apache.calcite.rel.`type`.RelDataType
+import org.apache.calcite.rel.core.{Aggregate, AggregateCall, Calc}
+import org.apache.calcite.rex._
+import org.apache.calcite.sql.SqlKind
+import org.apache.calcite.sql.`type`.SqlTypeFamily
+import org.apache.calcite.util.ImmutableBitSet
 import org.apache.flink.table.api.{DataTypes, TableConfig, TableException, ValidationException}
-import org.apache.flink.table.planner.JBigDecimal
+import org.apache.flink.table.planner.{JBigDecimal, JBoolean}
 import org.apache.flink.table.planner.calcite.FlinkTypeFactory
 import org.apache.flink.table.planner.functions.sql.{FlinkSqlOperatorTable, SqlWindowTableFunction}
 import org.apache.flink.table.planner.plan.`trait`.RelWindowProperties
@@ -31,16 +40,6 @@ import org.apache.flink.table.runtime.groupwindow._
 import org.apache.flink.table.runtime.types.LogicalTypeDataTypeConverter.fromDataTypeToLogicalType
 import org.apache.flink.table.types.logical.TimestampType
 import org.apache.flink.table.types.logical.utils.LogicalTypeChecks.canBeTimeAttributeType
-
-import org.apache.calcite.rel.`type`.RelDataType
-import org.apache.calcite.rel.core.{Aggregate, AggregateCall, Calc}
-import org.apache.calcite.rex._
-import org.apache.calcite.sql.`type`.SqlTypeFamily
-import org.apache.calcite.sql.SqlKind
-import org.apache.calcite.util.ImmutableBitSet
-
-import java.time.Duration
-import java.util.Collections
 
 import scala.collection.JavaConversions._
 import scala.collection.mutable
@@ -230,6 +229,19 @@ object WindowUtil {
         val step = getOperandAsLong(windowCall.operands(2))
         val maxSize = getOperandAsLong(windowCall.operands(3))
         new CumulativeWindowSpec(Duration.ofMillis(maxSize), Duration.ofMillis(step), offset)
+
+      case FlinkSqlOperatorTable.SLIDE =>
+        val allowedLateness = if (windowCall.operands.size() == 4) {
+          windowCall.operands(3) match {
+            case v: RexLiteral if v.getTypeName.getFamily == SqlTypeFamily.BOOLEAN =>
+              v.getValue.asInstanceOf[JBoolean].booleanValue()
+            case _ => throw new TableException("ALLOW_LATENESS must be input true or false params.")
+          }
+        } else {
+          false
+        }
+        val interval = getOperandAsLong(windowCall.operands(2))
+        new SlidingWindowSpec(Duration.ofMillis(interval), allowedLateness)
     }
 
     new TimeAttributeWindowingStrategy(windowSpec, timeAttributeType, timeIndex)

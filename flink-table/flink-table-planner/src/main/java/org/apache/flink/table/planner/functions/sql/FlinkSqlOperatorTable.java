@@ -1219,6 +1219,7 @@ public class FlinkSqlOperatorTable extends ReflectiveSqlOperatorTable {
     public static final SqlFunction TUMBLE = new SqlTumbleTableFunction();
     public static final SqlFunction HOP = new SqlHopTableFunction();
     public static final SqlFunction CUMULATE = new SqlCumulateTableFunction();
+    public static final SqlFunction SLIDE = new SqlSlideTableFunction();
 
     // Catalog Functions
     public static final SqlFunction CURRENT_DATABASE =

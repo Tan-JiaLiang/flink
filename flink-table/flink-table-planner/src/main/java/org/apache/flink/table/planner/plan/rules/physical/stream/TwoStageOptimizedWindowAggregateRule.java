@@ -20,6 +20,7 @@ package org.apache.flink.table.planner.plan.rules.physical.stream;
 
 import org.apache.flink.table.api.TableConfig;
 import org.apache.flink.table.planner.plan.logical.SliceAttachedWindowingStrategy;
+import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
 import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.WindowAttachedWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.WindowingStrategy;
@@ -97,6 +98,10 @@ public class TwoStageOptimizedWindowAggregateRule extends RelOptRule {
 
         // all aggregate function should support merge() method
         if (!AggregateUtil.doAllSupportPartialMerge(windowAgg.aggInfoList().aggInfos())) {
+            return false;
+        }
+
+        if (windowing.getWindow() instanceof SlidingWindowSpec) {
             return false;
         }
 

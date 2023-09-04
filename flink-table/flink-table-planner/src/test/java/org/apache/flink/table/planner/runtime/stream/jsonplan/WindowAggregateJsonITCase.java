@@ -216,4 +216,100 @@ public class WindowAggregateJsonITCase extends JsonPlanTestBase {
                         "+I[null, 7.0, 1]"),
                 result);
     }
+
+    @Test
+    public void testEventTimeSlideWindow() throws Exception {
+        createTestValuesSinkTable(
+                "MySink",
+                "name STRING",
+                "window_start TIMESTAMP(3)",
+                "window_end TIMESTAMP(3)",
+                "cnt BIGINT",
+                "sum_int INT",
+                "distinct_cnt BIGINT");
+        compileSqlAndExecutePlan(
+                "insert into MySink select\n"
+                        + "  name,\n"
+                        + "  window_start,\n"
+                        + "  window_end,\n"
+                        + "  COUNT(*),\n"
+                        + "  SUM(`int`),\n"
+                        + "  COUNT(DISTINCT `string`)\n"
+                        + "FROM TABLE(\n"
+                        + "   SLIDE(TABLE MyTable, DESCRIPTOR(rowtime), INTERVAL '5' SECOND))\n"
+                        + "GROUP BY name, window_start, window_end")
+                .await();
+
+        List<String> result = TestValuesTableFactory.getResults("MySink");
+        assertResult(
+                Arrays.asList(
+                        "+I[a, 2020-10-09T23:59:56, 2020-10-10T00:00:01, 1, 1, 1]",
+                        "+I[a, 2020-10-09T23:59:57, 2020-10-10T00:00:02, 2, 3, 2]",
+                        "+I[a, 2020-10-09T23:59:58, 2020-10-10T00:00:03, 3, 5, 2]",
+                        "+I[a, 2020-10-09T23:59:59, 2020-10-10T00:00:04, 4, 10, 2]",
+                        "+I[a, 2020-10-10T00:00:01, 2020-10-10T00:00:06, 3, 9, 1]",
+                        "+I[b, 2020-10-10T00:00:01, 2020-10-10T00:00:06, 1, 6, 1]",
+                        "+I[b, 2020-10-10T00:00:02, 2020-10-10T00:00:07, 2, 9, 2]",
+                        "+I[a, 2020-10-10T00:00:02, 2020-10-10T00:00:07, 2, 7, 1]",
+                        "+I[a, 2020-10-10T00:00:03, 2020-10-10T00:00:08, 2, 8, 1]",
+                        "+I[a, 2020-10-10T00:00:04, 2020-10-10T00:00:09, 1, 3, 1]",
+                        "+I[b, 2020-10-10T00:00:06, 2020-10-10T00:00:11, 1, 3, 1]",
+                        "+I[b, 2020-10-10T00:00:07, 2020-10-10T00:00:12, 0, null, 0]",
+                        "+I[a, 2020-10-10T00:00:08, 2020-10-10T00:00:13, 0, null, 0]",
+                        "+I[b, 2020-10-10T00:00:11, 2020-10-10T00:00:16, 1, 4, 1]",
+                        "+I[b, 2020-10-10T00:00:16, 2020-10-10T00:00:21, 0, null, 0]",
+                        "+I[b, 2020-10-10T00:00:29, 2020-10-10T00:00:34, 1, 1, 1]",
+                        "+I[b, 2020-10-10T00:00:34, 2020-10-10T00:00:39, 0, null, 0]",
+                        "+I[null, 2020-10-10T00:00:27, 2020-10-10T00:00:32, 1, 7, 0]",
+                        "+I[null, 2020-10-10T00:00:32, 2020-10-10T00:00:37, 0, null, 0]"),
+                result);
+    }
+
+    @Test
+    public void testEventTimeSlideWindowAllowedLateness() throws Exception {
+        createTestValuesSinkTable(
+                "MySink",
+                "name STRING",
+                "window_start TIMESTAMP(3)",
+                "window_end TIMESTAMP(3)",
+                "cnt BIGINT",
+                "sum_int INT",
+                "distinct_cnt BIGINT");
+        compileSqlAndExecutePlan(
+                "insert into MySink select\n"
+                        + "  name,\n"
+                        + "  window_start,\n"
+                        + "  window_end,\n"
+                        + "  COUNT(*),\n"
+                        + "  SUM(`int`),\n"
+                        + "  COUNT(DISTINCT `string`)\n"
+                        + "FROM TABLE(\n"
+                        + "   SLIDE(TABLE MyTable, DESCRIPTOR(rowtime), INTERVAL '5' SECOND, true))\n"
+                        + "GROUP BY name, window_start, window_end")
+                .await();
+
+        List<String> result = TestValuesTableFactory.getResults("MySink");
+        assertResult(
+                Arrays.asList(
+                        "+I[a, 2020-10-09T23:59:56, 2020-10-10T00:00:01, 1, 1, 1]",
+                        "+I[a, 2020-10-09T23:59:57, 2020-10-10T00:00:02, 2, 3, 2]",
+                        "+I[a, 2020-10-09T23:59:58, 2020-10-10T00:00:03, 3, 5, 2]",
+                        "+I[a, 2020-10-09T23:59:59, 2020-10-10T00:00:04, 4, 10, 2]",
+                        "+I[a, 2020-10-10T00:00:01, 2020-10-10T00:00:06, 3, 9, 1]",
+                        "+I[a, 2020-10-10T00:00:02, 2020-10-10T00:00:07, 2, 7, 1]",
+                        "+I[a, 2020-10-10T00:00:03, 2020-10-10T00:00:08, 3, 13, 2]",
+                        "+I[a, 2020-10-10T00:00:04, 2020-10-10T00:00:09, 1, 3, 1]",
+                        "+I[a, 2020-10-10T00:00:08, 2020-10-10T00:00:13, 0, null, 0]",
+                        "+I[b, 2020-10-10T00:00:01, 2020-10-10T00:00:06, 1, 6, 1]",
+                        "+I[b, 2020-10-10T00:00:02, 2020-10-10T00:00:07, 2, 9, 2]",
+                        "+I[b, 2020-10-10T00:00:06, 2020-10-10T00:00:11, 1, 3, 1]",
+                        "+I[b, 2020-10-10T00:00:07, 2020-10-10T00:00:12, 0, null, 0]",
+                        "+I[b, 2020-10-10T00:00:11, 2020-10-10T00:00:16, 1, 4, 1]",
+                        "+I[b, 2020-10-10T00:00:16, 2020-10-10T00:00:21, 0, null, 0]",
+                        "+I[b, 2020-10-10T00:00:29, 2020-10-10T00:00:34, 1, 1, 1]",
+                        "+I[b, 2020-10-10T00:00:34, 2020-10-10T00:00:39, 0, null, 0]",
+                        "+I[null, 2020-10-10T00:00:27, 2020-10-10T00:00:32, 1, 7, 0]",
+                        "+I[null, 2020-10-10T00:00:32, 2020-10-10T00:00:37, 0, null, 0]"),
+                result);
+    }
 }

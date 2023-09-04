@@ -22,7 +22,9 @@ import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.delegation.PlannerBase;
+import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
 import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
+import org.apache.flink.table.planner.plan.logical.WindowSpec;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecEdge;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNode;
 import org.apache.flink.table.planner.plan.nodes.exec.ExecNodeBase;
@@ -77,6 +79,12 @@ public abstract class CommonExecWindowTableFunction extends ExecNodeBase<RowData
     @Override
     protected Transformation<RowData> translateToPlanInternal(
             PlannerBase planner, ExecNodeConfig config) {
+        WindowSpec window = windowingStrategy.getWindow();
+        if (window instanceof SlidingWindowSpec) {
+            throw new UnsupportedOperationException(
+                    "SLIDE window must be using with group by syntax");
+        }
+
         final ExecEdge inputEdge = getInputEdges().get(0);
         final Transformation<RowData> inputTransform =
                 (Transformation<RowData>) inputEdge.translateToPlan(planner);
