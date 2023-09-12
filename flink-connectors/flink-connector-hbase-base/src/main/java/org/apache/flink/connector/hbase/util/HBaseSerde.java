@@ -57,6 +57,8 @@ public class HBaseSerde {
 
     private final byte[] nullStringBytes;
 
+    private final boolean writeIgnoreNullValue;
+
     // row key index in output row
     private final int rowkeyIndex;
 
@@ -76,7 +78,10 @@ public class HBaseSerde {
     private final FieldDecoder[][] qualifierDecoders;
     private final GenericRowData rowWithRowKey;
 
-    public HBaseSerde(HBaseTableSchema hbaseSchema, final String nullStringLiteral) {
+    public HBaseSerde(
+            HBaseTableSchema hbaseSchema,
+            final String nullStringLiteral,
+            boolean writeIgnoreNullValue) {
         this.families = hbaseSchema.getFamilyKeys();
         this.rowkeyIndex = hbaseSchema.getRowKeyIndex();
         LogicalType rowkeyType =
@@ -93,6 +98,7 @@ public class HBaseSerde {
             this.keyDecoder = null;
         }
         this.nullStringBytes = nullStringLiteral.getBytes(StandardCharsets.UTF_8);
+        this.writeIgnoreNullValue = writeIgnoreNullValue;
 
         // prepare output rows
         this.reusedRow = new GenericRowData(fieldLength);
@@ -141,6 +147,11 @@ public class HBaseSerde {
                 byte[] familyKey = families[f];
                 RowData familyRow = row.getRow(i, qualifiers[f].length);
                 for (int q = 0; q < this.qualifiers[f].length; q++) {
+                    // ignore null value or not
+                    if (writeIgnoreNullValue && familyRow.isNullAt(q)) {
+                        continue;
+                    }
+
                     // get quantifier key
                     byte[] qualifier = qualifiers[f][q];
                     // serialize value

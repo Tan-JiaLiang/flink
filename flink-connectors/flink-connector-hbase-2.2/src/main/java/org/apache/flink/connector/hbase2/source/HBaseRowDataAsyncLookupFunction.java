@@ -108,7 +108,7 @@ public class HBaseRowDataAsyncLookupFunction extends AsyncLookupFunction {
             LOG.error("Exception while creating connection to HBase.", e);
             throw new RuntimeException("Cannot create connection to HBase.", e);
         }
-        this.serde = new HBaseSerde(hbaseTableSchema, nullStringLiteral);
+        this.serde = new HBaseSerde(hbaseTableSchema, nullStringLiteral, false);
         LOG.info("end open.");
     }
 

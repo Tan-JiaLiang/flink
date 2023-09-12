@@ -42,18 +42,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.LOOKUP_ASYNC;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.LOOKUP_CACHE_MAX_ROWS;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.LOOKUP_CACHE_TTL;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.LOOKUP_MAX_RETRIES;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.NULL_STRING_LITERAL;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.SINK_BUFFER_FLUSH_INTERVAL;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.SINK_BUFFER_FLUSH_MAX_ROWS;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.SINK_BUFFER_FLUSH_MAX_SIZE;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.SINK_PARALLELISM;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.TABLE_NAME;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.ZOOKEEPER_QUORUM;
-import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.ZOOKEEPER_ZNODE_PARENT;
+import static org.apache.flink.connector.hbase.table.HBaseConnectorOptions.*;
 import static org.apache.flink.connector.hbase.table.HBaseConnectorOptionsUtil.PROPERTIES_PREFIX;
 import static org.apache.flink.connector.hbase.table.HBaseConnectorOptionsUtil.getHBaseConfiguration;
 import static org.apache.flink.connector.hbase.table.HBaseConnectorOptionsUtil.getHBaseWriteOptions;
@@ -149,6 +138,7 @@ public class HBase1DynamicTableFactory
         set.add(SINK_BUFFER_FLUSH_MAX_SIZE);
         set.add(SINK_BUFFER_FLUSH_MAX_ROWS);
         set.add(SINK_BUFFER_FLUSH_INTERVAL);
+        set.add(SINK_IGNORE_NULL_VALUE);
         set.add(SINK_PARALLELISM);
         set.add(LOOKUP_ASYNC);
         set.add(LOOKUP_CACHE_MAX_ROWS);
@@ -173,6 +163,7 @@ public class HBase1DynamicTableFactory
                         SINK_BUFFER_FLUSH_MAX_SIZE,
                         SINK_BUFFER_FLUSH_MAX_ROWS,
                         SINK_BUFFER_FLUSH_INTERVAL,
+                        SINK_IGNORE_NULL_VALUE,
                         LOOKUP_CACHE_MAX_ROWS,
                         LOOKUP_CACHE_TTL,
                         LOOKUP_MAX_RETRIES)
