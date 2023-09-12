@@ -35,6 +35,7 @@ import org.apache.hadoop.hbase.client.BufferedMutator;
 import org.apache.hadoop.hbase.client.BufferedMutatorParams;
 import org.apache.hadoop.hbase.client.Connection;
 import org.apache.hadoop.hbase.client.ConnectionFactory;
+import org.apache.hadoop.hbase.client.Mutation;
 import org.apache.hadoop.hbase.client.RetriesExhaustedWithDetailsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -191,7 +192,12 @@ public class HBaseSinkFunction<T> extends RichSinkFunction<T>
     public void invoke(T value, Context context) throws Exception {
         checkErrorAndRethrow();
 
-        mutator.mutate(mutationConverter.convertToMutation(value));
+        Mutation mutation = mutationConverter.convertToMutation(value);
+        if (mutation == null) {
+            return;
+        }
+
+        mutator.mutate(mutation);
 
         // flush when the buffer number of mutations greater than the configured max size.
         if (bufferFlushMaxMutations > 0

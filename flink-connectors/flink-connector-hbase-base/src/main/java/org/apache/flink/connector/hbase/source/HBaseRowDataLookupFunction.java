@@ -154,7 +154,7 @@ public class HBaseRowDataLookupFunction extends LookupFunction {
             LOG.error("Exception while creating connection to HBase.", ioe);
             throw new RuntimeException("Cannot create connection to HBase.", ioe);
         }
-        this.serde = new HBaseSerde(hbaseTableSchema, nullStringLiteral, false);
+        this.serde = new HBaseSerde(hbaseTableSchema, nullStringLiteral, false, false);
         LOG.info("end open.");
     }
 

@@ -58,6 +58,7 @@ public class HBaseSerde {
     private final byte[] nullStringBytes;
 
     private final boolean writeIgnoreNullValue;
+    private final boolean writeIgnoreDelete;
 
     // row key index in output row
     private final int rowkeyIndex;
@@ -81,7 +82,8 @@ public class HBaseSerde {
     public HBaseSerde(
             HBaseTableSchema hbaseSchema,
             final String nullStringLiteral,
-            boolean writeIgnoreNullValue) {
+            boolean writeIgnoreNullValue,
+            boolean writeIgnoreDelete) {
         this.families = hbaseSchema.getFamilyKeys();
         this.rowkeyIndex = hbaseSchema.getRowKeyIndex();
         LogicalType rowkeyType =
@@ -99,6 +101,7 @@ public class HBaseSerde {
         }
         this.nullStringBytes = nullStringLiteral.getBytes(StandardCharsets.UTF_8);
         this.writeIgnoreNullValue = writeIgnoreNullValue;
+        this.writeIgnoreDelete = writeIgnoreDelete;
 
         // prepare output rows
         this.reusedRow = new GenericRowData(fieldLength);
@@ -135,8 +138,8 @@ public class HBaseSerde {
         checkArgument(keyEncoder != null, "row key is not set.");
         byte[] rowkey = keyEncoder.encode(row, rowkeyIndex);
         if (rowkey.length == 0) {
-            // drop dirty records, rowkey shouldn't be zero length
-            return null;
+            // dirty records, rowkey shouldn't be zero length
+            throw new IllegalArgumentException("rowkey shouldn't be zero length");
         }
         // upsert
         Put put = new Put(rowkey);
@@ -169,11 +172,15 @@ public class HBaseSerde {
      * @return The appropriate instance of Delete for this use case.
      */
     public @Nullable Delete createDeleteMutation(RowData row) {
+        if (writeIgnoreDelete) {
+            return null;
+        }
+
         checkArgument(keyEncoder != null, "row key is not set.");
         byte[] rowkey = keyEncoder.encode(row, rowkeyIndex);
         if (rowkey.length == 0) {
-            // drop dirty records, rowkey shouldn't be zero length
-            return null;
+            // dirty records, rowkey shouldn't be zero length
+            throw new IllegalArgumentException("rowkey shouldn't be zero length");
         }
         // delete
         Delete delete = new Delete(rowkey);

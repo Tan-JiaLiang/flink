@@ -85,6 +85,7 @@ public class HBaseConnectorOptionsUtil {
         builder.setBufferFlushMaxSizeInBytes(
                 tableOptions.get(SINK_BUFFER_FLUSH_MAX_SIZE).getBytes());
         builder.setIgnoreNullValue(tableOptions.get(SINK_IGNORE_NULL_VALUE));
+        builder.setIgnoreDelete(tableOptions.get(SINK_IGNORE_DELETE));
         builder.setParallelism(tableOptions.getOptional(SINK_PARALLELISM).orElse(null));
         return builder.build();
     }

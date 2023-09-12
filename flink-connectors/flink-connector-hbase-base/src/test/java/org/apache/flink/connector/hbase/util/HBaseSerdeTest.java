@@ -113,7 +113,7 @@ public class HBaseSerdeTest {
                                         FIELD(F3COL2, DataTypes.BOOLEAN()),
                                         FIELD(F3COL3, STRING()))));
         HBaseTableSchema hbaseSchema = HBaseTableSchema.fromDataType(dataType);
-        return new HBaseSerde(hbaseSchema, "null", false);
+        return new HBaseSerde(hbaseSchema, "null", false, false);
     }
 
     private List<List<Cell>> prepareCells() {

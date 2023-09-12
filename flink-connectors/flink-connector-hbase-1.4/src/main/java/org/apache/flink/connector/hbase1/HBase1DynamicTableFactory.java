@@ -139,6 +139,7 @@ public class HBase1DynamicTableFactory
         set.add(SINK_BUFFER_FLUSH_MAX_ROWS);
         set.add(SINK_BUFFER_FLUSH_INTERVAL);
         set.add(SINK_IGNORE_NULL_VALUE);
+        set.add(SINK_IGNORE_DELETE);
         set.add(SINK_PARALLELISM);
         set.add(LOOKUP_ASYNC);
         set.add(LOOKUP_CACHE_MAX_ROWS);

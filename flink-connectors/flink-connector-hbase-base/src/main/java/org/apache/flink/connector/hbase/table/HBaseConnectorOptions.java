@@ -94,6 +94,12 @@ public class HBaseConnectorOptions {
                     .defaultValue(false)
                     .withDescription("Writing option, whether ignore null value or not.");
 
+    public static final ConfigOption<Boolean> SINK_IGNORE_DELETE =
+            ConfigOptions.key("sink.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Writing option, whether ignore delete mutation or not.");
+
     public static final ConfigOption<Boolean> LOOKUP_ASYNC =
             ConfigOptions.key("lookup.async")
                     .booleanType()

@@ -60,7 +60,7 @@ public class HBaseRowDataInputFormat extends AbstractTableInputFormat<RowData> {
 
     @Override
     protected void initTable() throws IOException {
-        this.serde = new HBaseSerde(schema, nullStringLiteral, false);
+        this.serde = new HBaseSerde(schema, nullStringLiteral, false, false);
         if (table == null) {
             connectToTable();
         }
