@@ -27,7 +27,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonTyp
     @JsonSubTypes.Type(value = TumblingWindowSpec.class),
     @JsonSubTypes.Type(value = HoppingWindowSpec.class),
     @JsonSubTypes.Type(value = CumulativeWindowSpec.class),
-    @JsonSubTypes.Type(value = SlidingWindowSpec.class)
+    @JsonSubTypes.Type(value = SlidingWindowSpec.class),
+    @JsonSubTypes.Type(value = HoppingV2WindowSpec.class)
 })
 public interface WindowSpec {
 

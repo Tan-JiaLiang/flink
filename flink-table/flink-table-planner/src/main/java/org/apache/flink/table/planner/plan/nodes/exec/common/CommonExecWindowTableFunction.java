@@ -22,6 +22,7 @@ import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.delegation.PlannerBase;
+import org.apache.flink.table.planner.plan.logical.HoppingV2WindowSpec;
 import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
 import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.WindowSpec;
@@ -83,6 +84,9 @@ public abstract class CommonExecWindowTableFunction extends ExecNodeBase<RowData
         if (window instanceof SlidingWindowSpec) {
             throw new UnsupportedOperationException(
                     "SLIDE window must be using with group by syntax");
+        } else if (window instanceof HoppingV2WindowSpec) {
+            throw new UnsupportedOperationException(
+                    "HOPV2 window must be using with group by syntax");
         }
 
         final ExecEdge inputEdge = getInputEdges().get(0);

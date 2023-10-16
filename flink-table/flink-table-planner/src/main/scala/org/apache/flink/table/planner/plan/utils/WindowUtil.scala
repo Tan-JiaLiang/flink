@@ -242,6 +242,20 @@ object WindowUtil {
         }
         val interval = getOperandAsLong(windowCall.operands(2))
         new SlidingWindowSpec(Duration.ofMillis(interval), allowedLateness)
+
+      case FlinkSqlOperatorTable.HOPV2 =>
+        val allowedLateness = if (windowCall.operands.size() == 5) {
+          windowCall.operands(4) match {
+            case v: RexLiteral if v.getTypeName.getFamily == SqlTypeFamily.BOOLEAN =>
+              v.getValue.asInstanceOf[JBoolean].booleanValue()
+            case _ => throw new TableException("ALLOW_LATENESS must be input true or false params.")
+          }
+        } else {
+          false
+        }
+        val slide = getOperandAsLong(windowCall.operands(2))
+        val size = getOperandAsLong(windowCall.operands(3))
+        new HoppingV2WindowSpec(Duration.ofMillis(size), Duration.ofMillis(slide), allowedLateness)
     }
 
     new TimeAttributeWindowingStrategy(windowSpec, timeAttributeType, timeIndex)

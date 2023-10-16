@@ -19,6 +19,7 @@
 package org.apache.flink.table.planner.plan.rules.physical.stream;
 
 import org.apache.flink.table.api.TableConfig;
+import org.apache.flink.table.planner.plan.logical.HoppingV2WindowSpec;
 import org.apache.flink.table.planner.plan.logical.SliceAttachedWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
 import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
@@ -102,6 +103,10 @@ public class TwoStageOptimizedWindowAggregateRule extends RelOptRule {
         }
 
         if (windowing.getWindow() instanceof SlidingWindowSpec) {
+            return false;
+        }
+
+        if (windowing.getWindow() instanceof HoppingV2WindowSpec) {
             return false;
         }
 

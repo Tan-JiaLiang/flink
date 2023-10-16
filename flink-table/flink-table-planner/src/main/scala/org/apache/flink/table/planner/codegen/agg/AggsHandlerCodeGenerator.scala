@@ -579,6 +579,114 @@ class AggsHandlerCodeGenerator(
   }
 
   /**
+   * Generate [[NamespaceAggsHandleFunction]] with the given function name and aggregate infos
+   * without window properties.
+   */
+  def generateNormalNamespaceAggsHandler[N](
+      name: String,
+      aggInfoList: AggregateInfoList,
+      namespaceClass: Class[N]): GeneratedNamespaceAggsHandleFunction[N] = {
+    hasNamespace = true
+    namespaceClassName = namespaceClass.getCanonicalName
+
+    initialAggregateInformation(aggInfoList)
+
+    // generates all methods body first to add necessary reuse code to context
+    val createAccumulatorsCode = genCreateAccumulators()
+    val getAccumulatorsCode = genGetAccumulators()
+    val setAccumulatorsCode = genSetAccumulators()
+    val accumulateCode = genAccumulate()
+    val retractCode = genRetract()
+    val mergeCode = genMerge()
+    val getValueCode = genGetValue()
+
+    val functionName = newName(name)
+
+    val functionCode =
+      j"""
+        public final class $functionName
+          implements $NAMESPACE_AGGS_HANDLER_FUNCTION<$namespaceClassName> {
+
+          ${ctx.reuseMemberCode()}
+
+          private $STATE_DATA_VIEW_STORE store;
+
+          private $namespaceClassName $NAMESPACE_TERM;
+
+          public $functionName(Object[] references) throws Exception {
+            ${ctx.reuseInitCode()}
+          }
+
+          private $RUNTIME_CONTEXT getRuntimeContext() {
+            return store.getRuntimeContext();
+          }
+
+          @Override
+          public void open($STATE_DATA_VIEW_STORE store) throws Exception {
+            this.store = store;
+            ${ctx.reuseOpenCode()}
+          }
+
+          @Override
+          public void accumulate($ROW_DATA $ACCUMULATE_INPUT_TERM) throws Exception {
+            $accumulateCode
+          }
+
+          @Override
+          public void retract($ROW_DATA $RETRACT_INPUT_TERM) throws Exception {
+            $retractCode
+          }
+
+          @Override
+          public void merge(Object ns, $ROW_DATA $MERGED_ACC_TERM) throws Exception {
+            $NAMESPACE_TERM = ($namespaceClassName) ns;
+            $mergeCode
+          }
+
+          @Override
+          public void setAccumulators(Object ns, $ROW_DATA $ACC_TERM)
+          throws Exception {
+            $NAMESPACE_TERM = ($namespaceClassName) ns;
+            $setAccumulatorsCode
+          }
+
+          @Override
+          public $ROW_DATA getAccumulators() throws Exception {
+            $getAccumulatorsCode
+          }
+
+          @Override
+          public $ROW_DATA createAccumulators() throws Exception {
+            $createAccumulatorsCode
+          }
+
+          @Override
+          public $ROW_DATA getValue(Object ns) throws Exception {
+            $NAMESPACE_TERM = ($namespaceClassName) ns;
+            $getValueCode
+          }
+
+          @Override
+          public void cleanup(Object ns) throws Exception {
+            $NAMESPACE_TERM = ($namespaceClassName) ns;
+            ${ctx.reuseCleanupCode()}
+          }
+
+          @Override
+          public void close() throws Exception {
+            ${ctx.reuseCloseCode()}
+          }
+        }
+      """.stripMargin
+
+    new GeneratedNamespaceAggsHandleFunction[N](
+      functionName,
+      functionCode,
+      ctx.references.toArray,
+      ctx.tableConfig)
+  }
+
+  /**
    * Generate [[NamespaceAggsHandleFunction]] with the given function name and aggregate infos and
    * window properties.
    */
@@ -1142,7 +1250,7 @@ class AggsHandlerCodeGenerator(
           codegen.getValue(exprGenerator)
       }
 
-    if (hasNamespace) {
+    if (hasNamespace && windowProperties != null) {
       // append window property results
       val windowExprs = getWindowExpressions(windowProperties)
       valueExprs = valueExprs ++ windowExprs

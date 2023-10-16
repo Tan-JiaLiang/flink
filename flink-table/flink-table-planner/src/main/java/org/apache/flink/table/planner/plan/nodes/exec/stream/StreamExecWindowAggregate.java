@@ -30,6 +30,7 @@ import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.planner.codegen.CodeGeneratorContext;
 import org.apache.flink.table.planner.codegen.agg.AggsHandlerCodeGenerator;
 import org.apache.flink.table.planner.delegation.PlannerBase;
+import org.apache.flink.table.planner.plan.logical.HoppingV2WindowSpec;
 import org.apache.flink.table.planner.plan.logical.SlidingWindowSpec;
 import org.apache.flink.table.planner.plan.logical.TimeAttributeWindowingStrategy;
 import org.apache.flink.table.planner.plan.logical.WindowingStrategy;
@@ -52,6 +53,8 @@ import org.apache.flink.table.runtime.groupwindow.WindowProperty;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.aggregate.window.SlicingWindowAggOperatorBuilder;
 import org.apache.flink.table.runtime.operators.window.SlidingWindowAggregateTableFunction;
+import org.apache.flink.table.runtime.operators.window.HoppingV2WindowAggregateTableFunction;
+import org.apache.flink.table.runtime.operators.window.HoppingV2WindowAggregateTableFunctionOperator;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceAssigner;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceSharedAssigner;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -242,6 +245,84 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
                             inputTransform,
                             createTransformationMeta(WINDOW_AGGREGATE_TRANSFORMATION, config),
                             new KeyedProcessOperator<>(operator),
+                            InternalTypeInfo.of(getOutputType()),
+                            inputTransform.getParallelism(),
+                            WINDOW_AGG_MEMORY_RATIO);
+        } else if (windowing.getWindow() instanceof HoppingV2WindowSpec) {
+            if (!isRowtimeAttribute(windowing.getTimeAttributeType())) {
+                throw new TableException("HOPV2 windows only support ROWTIME time attribute.");
+            }
+            final List<String> fieldNames = new ArrayList<>(inputRowType.getFieldNames());
+            final List<LogicalType> fieldTypes = new ArrayList<>(inputRowType.getChildren());
+            final RowType aggInputType =
+                    RowType.of(
+                            fieldTypes.toArray(new LogicalType[0]),
+                            fieldNames.toArray(new String[0]));
+
+            boolean[] aggCallNeedRetractions = new boolean[aggCalls.length];
+            Arrays.fill(aggCallNeedRetractions, true);
+
+            AggregateInfoList aggInfoList =
+                    AggregateUtil.transformToStreamAggregateInfoList(
+                            planner.getTypeFactory(),
+                            // use aggInputType which considers constants as input instead of
+                            // inputSchema.relDataType
+                            aggInputType,
+                            JavaScalaConversionUtil.toScala(Arrays.asList(aggCalls)),
+                            aggCallNeedRetractions,
+                            true, // needInputCount,
+                            true, // isStateBackendDataViews
+                            true); // needDistinctInfo
+            final LogicalType[] accTypes = convertToLogicalTypes(aggInfoList.getAccTypes());
+
+            final CodeGeneratorContext ctx =
+                    new CodeGeneratorContext(config, planner.getFlinkContext().getClassLoader());
+            AggsHandlerCodeGenerator generator =
+                    new AggsHandlerCodeGenerator(
+                            ctx,
+                            planner.createRelBuilder(),
+                            JavaScalaConversionUtil.toScala(fieldTypes),
+                            false); // copyInputField
+
+            List<String> windowsProperties = Arrays
+                    .stream(namedWindowProperties)
+                    .map(x -> x.getProperty().getClass().getSimpleName())
+                    .collect(Collectors.toList());
+
+            GeneratedNamespaceAggsHandleFunction<Long> genAggsHandler =
+                    generator
+                            .needAccumulate()
+                            .needMerge(0, false, null)
+                            .generateNormalNamespaceAggsHandler(
+                                    "HoppingV2WindowAggsHandler",
+                                    aggInfoList,
+                                    Long.class);
+
+            int rowtimeIdx = ((TimeAttributeWindowingStrategy) windowing).getTimeAttributeIndex();
+            HoppingV2WindowAggregateTableFunctionOperator<RowData, RowData, RowData> operator =
+                    new HoppingV2WindowAggregateTableFunctionOperator<>(
+                            new HoppingV2WindowAggregateTableFunction(
+                                    ((HoppingV2WindowSpec) windowing.getWindow())
+                                            .getSlide()
+                                            .toMillis(),
+                                    ((HoppingV2WindowSpec) windowing.getWindow())
+                                            .getSize()
+                                            .toMillis(),
+                                    ((HoppingV2WindowSpec) windowing.getWindow())
+                                            .getAllowedLateness(),
+                                    shiftTimeZone,
+                                    genAggsHandler,
+                                    accTypes,
+                                    fieldTypes.toArray(new LogicalType[]{}),
+                                    rowtimeIdx,
+                                    windowsProperties)
+                    );
+
+            transform =
+                    ExecNodeUtil.createOneInputTransformation(
+                            inputTransform,
+                            createTransformationMeta(WINDOW_AGGREGATE_TRANSFORMATION, config),
+                            SimpleOperatorFactory.of(operator),
                             InternalTypeInfo.of(getOutputType()),
                             inputTransform.getParallelism(),
                             WINDOW_AGG_MEMORY_RATIO);
