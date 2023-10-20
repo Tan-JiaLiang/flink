@@ -51,7 +51,7 @@ import org.apache.flink.table.runtime.groupwindow.NamedWindowProperty;
 import org.apache.flink.table.runtime.groupwindow.WindowProperty;
 import org.apache.flink.table.runtime.keyselector.RowDataKeySelector;
 import org.apache.flink.table.runtime.operators.aggregate.window.SlicingWindowAggOperatorBuilder;
-import org.apache.flink.table.runtime.operators.window.SlidingWindowAggregateTableFunctionOperator;
+import org.apache.flink.table.runtime.operators.window.SlidingWindowAggregateTableFunction;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceAssigner;
 import org.apache.flink.table.runtime.operators.window.slicing.SliceSharedAssigner;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
@@ -67,7 +67,6 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.tools.RelBuilder;
 
-import java.time.Duration;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -226,8 +225,8 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
                             .generateAggsHandler("SlidingWindowAggsHandler", aggInfoList);
 
             int rowtimeIdx = ((TimeAttributeWindowingStrategy) windowing).getTimeAttributeIndex();
-            SlidingWindowAggregateTableFunctionOperator operator =
-                    new SlidingWindowAggregateTableFunctionOperator(
+            SlidingWindowAggregateTableFunction operator =
+                    new SlidingWindowAggregateTableFunction(
                             ((SlidingWindowSpec) windowing.getWindow()).getSize().toMillis(),
                             ((SlidingWindowSpec) windowing.getWindow()).getAllowedLateness(),
                             shiftTimeZone,

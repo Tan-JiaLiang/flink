@@ -27,7 +27,7 @@ public class SqlSlideTableFunction extends SqlWindowTableFunction {
                             PARAM_TIMECOL,
                             PARAM_SIZE,
                             PARAM_ALLOWED_LATENESS),
-                    2);
+                    3);
         }
 
         @Override

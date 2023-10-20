@@ -23,6 +23,7 @@ import org.apache.flink.table.runtime.groupwindow.WindowStart;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.util.TimeWindowUtil;
 import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.util.CollectionUtil;
 import org.apache.flink.util.Collector;
 
 import org.slf4j.Logger;
@@ -32,12 +33,12 @@ import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 
-public class SlidingWindowAggregateTableFunctionOperator
+public class SlidingWindowAggregateTableFunction
         extends KeyedProcessFunction<RowData, RowData, RowData> {
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG =
-            LoggerFactory.getLogger(SlidingWindowAggregateTableFunctionOperator.class);
+            LoggerFactory.getLogger(SlidingWindowAggregateTableFunction.class);
 
     private final long size;
     private final ZoneId timezone;
@@ -53,6 +54,9 @@ public class SlidingWindowAggregateTableFunctionOperator
     private transient JoinedRowData output;
 
     // the state which keeps the last triggering timestamp
+    // @deprecated current watermark instead
+    @SuppressWarnings("DeprecatedIsStillUsed")
+    @Deprecated
     private transient ValueState<Long> lastTriggeringTsState;
 
     // the state which used to materialize the accumulator for incremental calculation
@@ -67,6 +71,9 @@ public class SlidingWindowAggregateTableFunctionOperator
     // the state which keeps the timestamp to retract inputState
     // The first element (as the mapState key) of the tuple is the retract timestamp and the second
     // element is the input timestamp
+    // @deprecated check the inputState instead
+    @SuppressWarnings("DeprecatedIsStillUsed")
+    @Deprecated
     private transient MapState<Long, Long> retractState;
 
     private transient AggsHandleFunction function;
@@ -82,7 +89,7 @@ public class SlidingWindowAggregateTableFunctionOperator
         return numLateRecordsDropped;
     }
 
-    public SlidingWindowAggregateTableFunctionOperator(
+    public SlidingWindowAggregateTableFunction(
             long size,
             boolean allowedLateness,
             ZoneId timezone,
@@ -151,44 +158,44 @@ public class SlidingWindowAggregateTableFunctionOperator
         long aLong = input.getLong(rowTimeIdx);
         long triggeringTs = TimeWindowUtil.toUtcTimestampMills(aLong, timezone);
 
-        Long lastTriggeringTs = lastTriggeringTsState.value();
-        if (lastTriggeringTs == null) {
-            lastTriggeringTs = 0L;
-        }
-
         // check if the data is expired
-        if (lateness(triggeringTs, lastTriggeringTs)) {
+        long currentWatermark = ctx.timerService().currentWatermark();
+        if (lateness(triggeringTs, currentWatermark)) {
             numLateRecordsDropped.inc();
             return;
         }
 
         List<RowData> data = inputState.get(triggeringTs);
-        if (data == null) {
-            data = new ArrayList<>();
-            data.add(input);
-            inputState.put(triggeringTs, data);
-            // register event time timer
-            ctx.timerService().registerEventTimeTimer(triggeringTs);
+        if (triggeringTs > currentWatermark) {
+            if (data == null) {
+                data = new ArrayList<>();
+                data.add(input);
+                inputState.put(triggeringTs, data);
+                // register event time timer
+                ctx.timerService().registerEventTimeTimer(triggeringTs);
+            } else {
+                data.add(input);
+                inputState.put(triggeringTs, data);
+            }
         } else {
+            if (data == null) {
+                data = new ArrayList<>();
+            }
             data.add(input);
             inputState.put(triggeringTs, data);
 
-            if (triggeringTs <= lastTriggeringTs) {
-                // accumulate the allowedLateness data without emit
-                function.setAccumulators(
-                        accState.value() == null ?
-                                function.createAccumulators() :
-                                accState.value()
-                );
-                function.accumulate(input);
-                accState.update(function.getAccumulators());
-            }
+            // accumulate the allowedLateness data without emit
+            function.setAccumulators(
+                    accState.value() == null ?
+                            function.createAccumulators() :
+                            accState.value()
+            );
+            function.accumulate(input);
+            accState.update(function.getAccumulators());
         }
 
         // calculate timestamp to retract data
-        long retractTs = triggeringTs + size;
-        ctx.timerService().registerEventTimeTimer(retractTs);
-        retractState.put(retractTs, triggeringTs);
+        ctx.timerService().registerEventTimeTimer(triggeringTs + size);
     }
 
     @Override
@@ -205,24 +212,12 @@ public class SlidingWindowAggregateTableFunctionOperator
         );
 
         // retraction
-        Long triggerTs = retractState.get(timestamp);
-        if (triggerTs != null) {
-            List<RowData> retracts = inputState.get(triggerTs);
-            if (retracts != null) {
-                for (RowData retractRow : retracts) {
-                    function.retract(retractRow);
-                }
-            } else {
-                // Does not retract values which are outside of window if the state is
-                // cleared already.
-                LOG.warn(
-                        "The state is cleared because of state ttl. "
-                                + "This will result in incorrect result. "
-                                + "You can increase the state ttl to avoid this.");
+        List<RowData> retracts = inputState.get(timestamp - size);
+        if (retracts != null) {
+            for (RowData retractRow : retracts) {
+                function.retract(retractRow);
             }
-
-            retractState.remove(timestamp);
-            inputState.remove(triggerTs);
+            inputState.remove(timestamp - size);
         }
 
         // accumulation
@@ -238,10 +233,7 @@ public class SlidingWindowAggregateTableFunctionOperator
         RowData output = toOutputRowData(ctx.getCurrentKey(), aggValue, timestamp);
         out.collect(output);
 
-        // update the trigger timestamp
-        lastTriggeringTsState.update(timestamp);
-
-        if (inputState.isEmpty()) {
+        if (CollectionUtil.isNullOrEmpty(inputs) && inputState.isEmpty()) {
             // clear all state
             inputState.clear();
             accState.clear();
@@ -254,12 +246,12 @@ public class SlidingWindowAggregateTableFunctionOperator
         }
     }
 
-    private boolean lateness(long triggeringTs, long lastTriggeringTs) {
-        if (triggeringTs > lastTriggeringTs) {
+    private boolean lateness(long triggeringTs, long currentWatermark) {
+        if (triggeringTs > currentWatermark) {
             return false;
         }
 
-        if (allowedLateness && triggeringTs > lastTriggeringTs - size) {
+        if (allowedLateness && triggeringTs > currentWatermark - size) {
             return false;
         }
 
