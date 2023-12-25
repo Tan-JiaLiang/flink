@@ -35,7 +35,8 @@ import java.util.Set;
 public class KafkaPartitionSplit implements SourceSplit {
     public static final long NO_STOPPING_OFFSET = Long.MIN_VALUE;
     // Indicating the split should consume from the latest.
-    public static final long LATEST_OFFSET = -1;
+    // @deprecated Only be used for compatibility with the history state, see FLINK-28303
+    @Deprecated public static final long LATEST_OFFSET = -1;
     // Indicating the split should consume from the earliest.
     public static final long EARLIEST_OFFSET = -2;
     // Indicating the split should consume from the last committed offset.
