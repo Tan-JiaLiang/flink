@@ -50,6 +50,8 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
     private boolean firstWatermark = true;
     private long currentMaxDesiredWatermark;
     private boolean firstDesiredWatermark = true;
+    private long lastFetchTime = TimestampAssigner.NO_TIMESTAMP;
+    private boolean firstFetchTime = true;
 
     private InternalSourceReaderMetricGroup(
             MetricGroup parentMetricGroup,
@@ -96,6 +98,17 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
     @Override
     public OperatorIOMetricGroup getIOMetricGroup() {
         return operatorIOMetricGroup;
+    }
+
+    @Override
+    public void recordFetched() {
+        lastFetchTime = clock.absoluteTimeMillis();
+        if (firstFetchTime) {
+            parentMetricGroup.gauge(
+                    MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
+            parentMetricGroup.gauge(MetricNames.PROCESSING_LAG, this::getProcessingLag);
+            firstFetchTime = false;
+        }
     }
 
     /**
@@ -164,6 +177,22 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
         return lastEventTime != TimestampAssigner.NO_TIMESTAMP
                 ? getLastEmitTime() - lastEventTime
                 : UNDEFINED;
+    }
+
+    long getFetchTimeLag() {
+        return lastFetchTime != TimestampAssigner.NO_TIMESTAMP
+                        && lastEventTime != TimestampAssigner.NO_TIMESTAMP
+                ? lastFetchTime - lastEventTime
+                : UNDEFINED;
+    }
+
+    long getProcessingLag() {
+        if (lastFetchTime == TimestampAssigner.NO_TIMESTAMP
+                || lastEventTime == TimestampAssigner.NO_TIMESTAMP) {
+            return UNDEFINED;
+        }
+        long lastEmitTime = getLastEmitTime();
+        return lastEmitTime > lastFetchTime ? lastEmitTime - lastFetchTime : 0;
     }
 
     long getWatermarkLag() {

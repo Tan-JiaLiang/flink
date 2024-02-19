@@ -180,6 +180,11 @@ public class KafkaSourceReaderMetrics {
         commitsFailed.inc();
     }
 
+    /** Mark the record fetch time. */
+    public void recordFetched() {
+        sourceReaderMetricGroup.recordFetched();
+    }
+
     /**
      * Register {@link MetricNames#IO_NUM_BYTES_IN}.
      *

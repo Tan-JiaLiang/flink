@@ -160,6 +160,9 @@ public class UnregisteredMetricsGroup implements MetricGroup {
 
         @Override
         public void setPendingRecordsGauge(Gauge<Long> pendingRecordsGauge) {}
+
+        @Override
+        public void recordFetched() {}
     }
 
     private static class DummyGauge<T> implements Gauge<T> {

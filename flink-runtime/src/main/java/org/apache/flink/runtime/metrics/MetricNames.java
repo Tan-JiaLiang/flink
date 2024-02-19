@@ -97,6 +97,7 @@ public class MetricNames {
     public static final String NUM_RECORDS_IN_ERRORS = "numRecordsInErrors";
     public static final String CURRENT_FETCH_EVENT_TIME_LAG = "currentFetchEventTimeLag";
     public static final String CURRENT_EMIT_EVENT_TIME_LAG = "currentEmitEventTimeLag";
+    public static final String PROCESSING_LAG = "processingLag";
     public static final String WATERMARK_LAG = "watermarkLag";
     public static final String PENDING_RECORDS = "pendingRecords";
     public static final String PENDING_BYTES = "pendingBytes";

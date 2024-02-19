@@ -40,6 +40,7 @@ import java.util.concurrent.CompletableFuture;
  *   <li>{@link SourceReaderMetricGroup#getNumRecordsInErrorsCounter()} (recommended)
  *   <li>{@link SourceReaderMetricGroup#setPendingRecordsGauge(Gauge)}
  *   <li>{@link SourceReaderMetricGroup#setPendingBytesGauge(Gauge)}
+ *   <li>{@link SourceReaderMetricGroup#recordFetched()}
  * </ul>
  *
  * @param <T> The type of the record emitted by this source reader.

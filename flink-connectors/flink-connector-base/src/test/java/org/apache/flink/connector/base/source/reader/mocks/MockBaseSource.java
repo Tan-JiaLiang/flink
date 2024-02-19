@@ -75,6 +75,7 @@ public class MockBaseSource implements Source<Integer, MockSourceSplit, List<Moc
         MockSplitReader.Builder builder =
                 MockSplitReader.newBuilder()
                         .setNumRecordsPerSplitPerFetch(2)
+                        .setSourceMetricGroup(readerContext.metricGroup())
                         .setBlockingFetch(true);
         return new MockSourceReader(elementsQueue, builder::build, config, readerContext);
     }

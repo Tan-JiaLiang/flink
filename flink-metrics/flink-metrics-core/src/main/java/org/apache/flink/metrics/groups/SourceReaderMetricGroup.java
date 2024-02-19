@@ -46,4 +46,12 @@ public interface SourceReaderMetricGroup extends OperatorMetricGroup {
      * <p>Note that not every source can report this metric in an plausible and efficient way.
      */
     void setPendingRecordsGauge(Gauge<Long> pendingRecordsGauge);
+
+    /**
+     * Called when a new record was fetched.
+     *
+     * <p>Note this function should be called before the actual record is processed such that
+     * chained processing does not influence the statistics.
+     */
+    void recordFetched();
 }

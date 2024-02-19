@@ -24,6 +24,7 @@ import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitReader;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
+import org.apache.flink.metrics.groups.SourceReaderMetricGroup;
 
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -41,6 +42,7 @@ public class MockSplitReader implements SplitReader<int[], MockSourceSplit> {
     private final int numRecordsPerSplitPerFetch;
     private final boolean separatedFinishedRecord;
     private final boolean blockingFetch;
+    private final SourceReaderMetricGroup sourceReaderMetricGroup;
 
     private final Object wakeupLock = new Object();
     private volatile Thread threadInBlocking;
@@ -49,10 +51,12 @@ public class MockSplitReader implements SplitReader<int[], MockSourceSplit> {
     private MockSplitReader(
             int numRecordsPerSplitPerFetch,
             boolean separatedFinishedRecord,
-            boolean blockingFetch) {
+            boolean blockingFetch,
+            SourceReaderMetricGroup sourceReaderMetricGroup) {
         this.numRecordsPerSplitPerFetch = numRecordsPerSplitPerFetch;
         this.separatedFinishedRecord = separatedFinishedRecord;
         this.blockingFetch = blockingFetch;
+        this.sourceReaderMetricGroup = sourceReaderMetricGroup;
     }
 
     @Override
@@ -105,6 +109,7 @@ public class MockSplitReader implements SplitReader<int[], MockSourceSplit> {
                     int[] record = split.getNext(blockingFetch);
                     if (record != null) {
                         records.add(entry.getKey(), record);
+                        sourceReaderMetricGroup.recordFetched();
                         hasRecords = true;
                     }
                 }
@@ -142,6 +147,7 @@ public class MockSplitReader implements SplitReader<int[], MockSourceSplit> {
         private int numRecordsPerSplitPerFetch = 2;
         private boolean separatedFinishedRecord = false;
         private boolean blockingFetch = false;
+        private SourceReaderMetricGroup sourceReaderMetricGroup;
 
         public Builder setNumRecordsPerSplitPerFetch(int numRecordsPerSplitPerFetch) {
             this.numRecordsPerSplitPerFetch = numRecordsPerSplitPerFetch;
@@ -158,9 +164,17 @@ public class MockSplitReader implements SplitReader<int[], MockSourceSplit> {
             return this;
         }
 
+        public Builder setSourceMetricGroup(SourceReaderMetricGroup sourceReaderMetricGroup) {
+            this.sourceReaderMetricGroup = sourceReaderMetricGroup;
+            return this;
+        }
+
         public MockSplitReader build() {
             return new MockSplitReader(
-                    numRecordsPerSplitPerFetch, separatedFinishedRecord, blockingFetch);
+                    numRecordsPerSplitPerFetch,
+                    separatedFinishedRecord,
+                    blockingFetch,
+                    sourceReaderMetricGroup);
         }
     }
 
