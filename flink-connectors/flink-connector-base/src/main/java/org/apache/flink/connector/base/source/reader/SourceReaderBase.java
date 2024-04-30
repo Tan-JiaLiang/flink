@@ -459,6 +459,13 @@ public abstract class SourceReaderBase<E, T, SplitT extends SourceSplit, SplitSt
             }
         }
 
+        @Override
+        public void collect(T record, long timestamp, long fetchTime) {
+            if (!isEndOfStreamReached(record)) {
+                sourceOutput.collect(record, timestamp, fetchTime);
+            }
+        }
+
         /**
          * Judge and handle the eof record.
          *

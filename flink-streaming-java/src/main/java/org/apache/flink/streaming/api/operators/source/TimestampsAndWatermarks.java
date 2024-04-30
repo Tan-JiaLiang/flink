@@ -23,7 +23,7 @@ import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.ReaderOutput;
-import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 
@@ -89,7 +89,7 @@ public interface TimestampsAndWatermarks<T> {
 
     static <E> TimestampsAndWatermarks<E> createProgressiveEventTimeLogic(
             WatermarkStrategy<E> watermarkStrategy,
-            MetricGroup metrics,
+            InternalSourceReaderMetricGroup metrics,
             ProcessingTimeService timeService,
             long periodicWatermarkIntervalMillis) {
 
@@ -102,16 +102,17 @@ public interface TimestampsAndWatermarks<T> {
                 watermarkStrategy,
                 context,
                 timeService,
+                metrics,
                 Duration.ofMillis(periodicWatermarkIntervalMillis));
     }
 
     static <E> TimestampsAndWatermarks<E> createNoOpEventTimeLogic(
-            WatermarkStrategy<E> watermarkStrategy, MetricGroup metrics) {
+            WatermarkStrategy<E> watermarkStrategy, InternalSourceReaderMetricGroup metrics) {
 
         final TimestampsAndWatermarksContext context = new TimestampsAndWatermarksContext(metrics);
         final TimestampAssigner<E> timestampAssigner =
                 watermarkStrategy.createTimestampAssigner(context);
 
-        return new NoOpTimestampsAndWatermarks<>(timestampAssigner);
+        return new NoOpTimestampsAndWatermarks<>(timestampAssigner, metrics);
     }
 }

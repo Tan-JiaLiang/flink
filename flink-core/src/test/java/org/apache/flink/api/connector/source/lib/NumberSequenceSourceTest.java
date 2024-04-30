@@ -165,6 +165,11 @@ public class NumberSequenceSourceTest {
         }
 
         @Override
+        public void collect(E record, long timestamp, long fetchTime) {
+            collect(record);
+        }
+
+        @Override
         public void emitWatermark(Watermark watermark) {
             throw new UnsupportedOperationException();
         }

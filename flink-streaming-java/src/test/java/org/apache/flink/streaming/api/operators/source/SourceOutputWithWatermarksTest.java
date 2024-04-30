@@ -24,6 +24,9 @@ import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
+import org.apache.flink.runtime.metrics.groups.GenericMetricGroup;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
+import org.apache.flink.runtime.metrics.util.TestingMetricRegistry;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
@@ -46,12 +49,16 @@ class SourceOutputWithWatermarksTest {
         final WatermarkOutput watermarkOutput =
                 new WatermarkToDataOutput(recordsAndWatermarksOutput);
 
+        TestingMetricRegistry registry = TestingMetricRegistry.builder().build();
+        GenericMetricGroup metricGroup = new GenericMetricGroup(registry, null, "rootMetricGroup");
+
         return new SourceOutputWithWatermarks<>(
                 recordsAndWatermarksOutput,
                 watermarkOutput,
                 watermarkOutput,
                 timestampAssigner,
-                watermarkGenerator);
+                watermarkGenerator,
+                InternalSourceReaderMetricGroup.mock(metricGroup));
     }
 
     @Test
@@ -84,6 +91,20 @@ class SourceOutputWithWatermarksTest {
                 .contains(
                         new StreamRecord<>(42, 12345L),
                         new org.apache.flink.streaming.api.watermark.Watermark(12345L));
+    }
+
+    @Test
+    public void testCollectWithFetchTime() {
+        final CollectingDataOutput<Integer> dataOutput = new CollectingDataOutput<>();
+        final SourceOutputWithWatermarks<Integer> out =
+                createWithSameOutputs(
+                        dataOutput,
+                        new RecordTimestampAssigner<>(),
+                        new TestWatermarkGenerator<>());
+
+        out.collect(42, 12345L, 12355L);
+
+        assertThat(out.getMetricGroup().getFetchTimeLag()).isEqualTo(10L);
     }
 
     // ------------------------------------------------------------------------

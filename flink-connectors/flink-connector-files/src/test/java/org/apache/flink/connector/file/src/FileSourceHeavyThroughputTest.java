@@ -241,6 +241,9 @@ class FileSourceHeavyThroughputTest {
         public void collect(E record, long timestamp) {}
 
         @Override
+        public void collect(E record, long timestamp, long fetchTime) {}
+
+        @Override
         public void emitWatermark(Watermark watermark) {}
 
         @Override

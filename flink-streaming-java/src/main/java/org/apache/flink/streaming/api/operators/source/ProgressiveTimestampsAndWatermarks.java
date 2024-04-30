@@ -27,6 +27,7 @@ import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.common.eventtime.WatermarkOutputMultiplexer;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.tasks.ProcessingTimeService;
 
@@ -57,6 +58,8 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
 
     private final ProcessingTimeService timeService;
 
+    private final InternalSourceReaderMetricGroup metricGroup;
+
     private final long periodicWatermarkInterval;
 
     @Nullable private SplitLocalOutputs<T> currentPerSplitOutputs;
@@ -70,12 +73,14 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
             WatermarkGeneratorSupplier<T> watermarksFactory,
             WatermarkGeneratorSupplier.Context watermarksContext,
             ProcessingTimeService timeService,
+            InternalSourceReaderMetricGroup metricGroup,
             Duration periodicWatermarkInterval) {
 
         this.timestampAssigner = timestampAssigner;
         this.watermarksFactory = watermarksFactory;
         this.watermarksContext = watermarksContext;
         this.timeService = timeService;
+        this.metricGroup = metricGroup;
 
         long periodicWatermarkIntervalMillis;
         try {
@@ -115,7 +120,8 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                         watermarkUpdateListener,
                         timestampAssigner,
                         watermarksFactory,
-                        watermarksContext);
+                        watermarksContext,
+                        metricGroup);
 
         currentMainOutput =
                 new StreamingReaderOutput<>(
@@ -123,7 +129,8 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                         idlenessManager.getMainOutput(),
                         timestampAssigner,
                         watermarkGenerator,
-                        currentPerSplitOutputs);
+                        currentPerSplitOutputs,
+                        metricGroup);
 
         return currentMainOutput;
     }
@@ -174,9 +181,16 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                 WatermarkOutput watermarkOutput,
                 TimestampAssigner<T> timestampAssigner,
                 WatermarkGenerator<T> watermarkGenerator,
-                SplitLocalOutputs<T> splitLocalOutputs) {
+                SplitLocalOutputs<T> splitLocalOutputs,
+                InternalSourceReaderMetricGroup metricGroup) {
 
-            super(output, watermarkOutput, watermarkOutput, timestampAssigner, watermarkGenerator);
+            super(
+                    output,
+                    watermarkOutput,
+                    watermarkOutput,
+                    timestampAssigner,
+                    watermarkGenerator,
+                    metricGroup);
             this.splitLocalOutputs = splitLocalOutputs;
         }
 
@@ -208,6 +222,7 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
         private final WatermarkGeneratorSupplier<T> watermarksFactory;
         private final WatermarkGeneratorSupplier.Context watermarkContext;
         private final WatermarkUpdateListener watermarkUpdateListener;
+        private final InternalSourceReaderMetricGroup metricGroup;
 
         private SplitLocalOutputs(
                 PushingAsyncDataInput.DataOutput<T> recordOutput,
@@ -215,13 +230,15 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                 WatermarkUpdateListener watermarkUpdateListener,
                 TimestampAssigner<T> timestampAssigner,
                 WatermarkGeneratorSupplier<T> watermarksFactory,
-                WatermarkGeneratorSupplier.Context watermarkContext) {
+                WatermarkGeneratorSupplier.Context watermarkContext,
+                InternalSourceReaderMetricGroup metricGroup) {
 
             this.recordOutput = recordOutput;
             this.timestampAssigner = timestampAssigner;
             this.watermarksFactory = watermarksFactory;
             this.watermarkContext = watermarkContext;
             this.watermarkUpdateListener = watermarkUpdateListener;
+            this.metricGroup = metricGroup;
 
             this.watermarkMultiplexer = new WatermarkOutputMultiplexer(watermarkOutput);
             this.localOutputs =
@@ -251,7 +268,8 @@ public class ProgressiveTimestampsAndWatermarks<T> implements TimestampsAndWater
                             onEventOutput,
                             periodicOutput,
                             timestampAssigner,
-                            watermarks);
+                            watermarks,
+                            metricGroup);
 
             localOutputs.put(splitId, localOutput);
             return localOutput;

@@ -19,11 +19,14 @@
 package org.apache.flink.streaming.api.operators.source;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.common.eventtime.WatermarkGenerator;
 import org.apache.flink.api.common.eventtime.WatermarkOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ExceptionInChainedOperatorException;
@@ -68,6 +71,8 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
 
     private final WatermarkOutput periodicWatermarkOutput;
 
+    private final InternalSourceReaderMetricGroup metricGroup;
+
     private final StreamRecord<T> reusingRecord;
 
     /**
@@ -79,13 +84,15 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
             WatermarkOutput onEventWatermarkOutput,
             WatermarkOutput periodicWatermarkOutput,
             TimestampAssigner<T> timestampAssigner,
-            WatermarkGenerator<T> watermarkGenerator) {
+            WatermarkGenerator<T> watermarkGenerator,
+            InternalSourceReaderMetricGroup metricGroup) {
 
         this.recordsOutput = checkNotNull(recordsOutput);
         this.onEventWatermarkOutput = checkNotNull(onEventWatermarkOutput);
         this.periodicWatermarkOutput = checkNotNull(periodicWatermarkOutput);
         this.timestampAssigner = checkNotNull(timestampAssigner);
         this.watermarkGenerator = checkNotNull(watermarkGenerator);
+        this.metricGroup = checkNotNull(metricGroup);
         this.reusingRecord = new StreamRecord<>(null);
     }
 
@@ -103,8 +110,17 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
 
     @Override
     public final void collect(T record, long timestamp) {
+        collect(record, timestamp, TimestampAssigner.NO_TIMESTAMP);
+    }
+
+    @Override
+    public void collect(T record, long timestamp, long fetchTime) {
         try {
             final long assignedTimestamp = timestampAssigner.extractTimestamp(record, timestamp);
+            if (fetchTime != TimestampAssigner.NO_TIMESTAMP
+                    && assignedTimestamp != TimestampAssigner.NO_TIMESTAMP) {
+                metricGroup.setCurrentFetchEventTimeLag(fetchTime - assignedTimestamp);
+            }
 
             // IMPORTANT: The event must be emitted before the watermark generator is called.
             recordsOutput.emitRecord(reusingRecord.replace(record, assignedTimestamp));
@@ -144,6 +160,11 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
         watermarkGenerator.onPeriodicEmit(periodicWatermarkOutput);
     }
 
+    @VisibleForTesting
+    public final InternalSourceReaderMetricGroup getMetricGroup() {
+        return metricGroup;
+    }
+
     // ------------------------------------------------------------------------
     // Factories
     // ------------------------------------------------------------------------
@@ -157,13 +178,15 @@ public class SourceOutputWithWatermarks<T> implements SourceOutput<T> {
             WatermarkOutput onEventWatermarkOutput,
             WatermarkOutput periodicWatermarkOutput,
             TimestampAssigner<E> timestampAssigner,
-            WatermarkGenerator<E> watermarkGenerator) {
+            WatermarkGenerator<E> watermarkGenerator,
+            InternalSourceReaderMetricGroup metricGroup) {
 
         return new SourceOutputWithWatermarks<>(
                 recordsOutput,
                 onEventWatermarkOutput,
                 periodicWatermarkOutput,
                 timestampAssigner,
-                watermarkGenerator);
+                watermarkGenerator,
+                metricGroup);
     }
 }

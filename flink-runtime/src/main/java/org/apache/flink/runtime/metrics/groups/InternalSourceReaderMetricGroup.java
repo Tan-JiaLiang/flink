@@ -50,6 +50,8 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
     private boolean firstWatermark = true;
     private long currentMaxDesiredWatermark;
     private boolean firstDesiredWatermark = true;
+    private boolean firstFetchEventTimeLag = true;
+    private long currentFetchEventTimeLag;
 
     private InternalSourceReaderMetricGroup(
             MetricGroup parentMetricGroup,
@@ -116,6 +118,15 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
         }
     }
 
+    public void setCurrentFetchEventTimeLag(long currentFetchEventTimeLag) {
+        this.currentFetchEventTimeLag = currentFetchEventTimeLag;
+        if (firstFetchEventTimeLag) {
+            parentMetricGroup.gauge(
+                    MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
+            firstFetchEventTimeLag = false;
+        }
+    }
+
     /**
      * Called when a watermark was emitted.
      *
@@ -164,6 +175,11 @@ public class InternalSourceReaderMetricGroup extends ProxyMetricGroup<MetricGrou
         return lastEventTime != TimestampAssigner.NO_TIMESTAMP
                 ? getLastEmitTime() - lastEventTime
                 : UNDEFINED;
+    }
+
+    @VisibleForTesting
+    public long getFetchTimeLag() {
+        return this.currentFetchEventTimeLag;
     }
 
     long getWatermarkLag() {

@@ -23,6 +23,7 @@ import org.apache.flink.api.common.eventtime.TimestampAssigner;
 import org.apache.flink.api.common.eventtime.Watermark;
 import org.apache.flink.api.connector.source.ReaderOutput;
 import org.apache.flink.api.connector.source.SourceOutput;
+import org.apache.flink.runtime.metrics.groups.InternalSourceReaderMetricGroup;
 import org.apache.flink.streaming.runtime.io.PushingAsyncDataInput;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.ExceptionInChainedOperatorException;
@@ -40,17 +41,20 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public class NoOpTimestampsAndWatermarks<T> implements TimestampsAndWatermarks<T> {
 
     private final TimestampAssigner<T> timestamps;
+    private final InternalSourceReaderMetricGroup metricGroup;
 
     /** Creates a new {@link NoOpTimestampsAndWatermarks} with the given TimestampAssigner. */
-    public NoOpTimestampsAndWatermarks(TimestampAssigner<T> timestamps) {
+    public NoOpTimestampsAndWatermarks(
+            TimestampAssigner<T> timestamps, InternalSourceReaderMetricGroup metricGroup) {
         this.timestamps = checkNotNull(timestamps);
+        this.metricGroup = checkNotNull(metricGroup);
     }
 
     @Override
     public ReaderOutput<T> createMainOutput(
             PushingAsyncDataInput.DataOutput<T> output, WatermarkUpdateListener watermarkEmitted) {
         checkNotNull(output);
-        return new TimestampsOnlyOutput<>(output, timestamps);
+        return new TimestampsOnlyOutput<>(output, timestamps, metricGroup);
     }
 
     @Override
@@ -81,14 +85,17 @@ public class NoOpTimestampsAndWatermarks<T> implements TimestampsAndWatermarks<T
 
         private final PushingAsyncDataInput.DataOutput<T> output;
         private final TimestampAssigner<T> timestampAssigner;
+        private final InternalSourceReaderMetricGroup metricGroup;
         private final StreamRecord<T> reusingRecord;
 
         private TimestampsOnlyOutput(
                 PushingAsyncDataInput.DataOutput<T> output,
-                TimestampAssigner<T> timestampAssigner) {
+                TimestampAssigner<T> timestampAssigner,
+                InternalSourceReaderMetricGroup metricGroup) {
 
             this.output = output;
             this.timestampAssigner = timestampAssigner;
+            this.metricGroup = metricGroup;
             this.reusingRecord = new StreamRecord<>(null);
         }
 
@@ -99,10 +106,19 @@ public class NoOpTimestampsAndWatermarks<T> implements TimestampsAndWatermarks<T
 
         @Override
         public void collect(T record, long timestamp) {
+            collect(record, timestamp, TimestampAssigner.NO_TIMESTAMP);
+        }
+
+        @Override
+        public void collect(T record, long timestamp, long fetchTime) {
             try {
-                output.emitRecord(
-                        reusingRecord.replace(
-                                record, timestampAssigner.extractTimestamp(record, timestamp)));
+                long assignedTimestamp = timestampAssigner.extractTimestamp(record, timestamp);
+                if (fetchTime != TimestampAssigner.NO_TIMESTAMP
+                        && assignedTimestamp != TimestampAssigner.NO_TIMESTAMP) {
+                    metricGroup.setCurrentFetchEventTimeLag(fetchTime - assignedTimestamp);
+                }
+
+                output.emitRecord(reusingRecord.replace(record, assignedTimestamp));
             } catch (ExceptionInChainedOperatorException e) {
                 throw e;
             } catch (Exception e) {

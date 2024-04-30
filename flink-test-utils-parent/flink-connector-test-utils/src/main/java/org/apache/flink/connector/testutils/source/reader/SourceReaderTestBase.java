@@ -201,6 +201,11 @@ public abstract class SourceReaderTestBase<SplitT extends SourceSplit> extends T
             collect(element);
         }
 
+        @Override
+        public void collect(Integer element, long timestamp, long fetchTime) {
+            collect(element);
+        }
+
         public void validate() {
 
             assertThat(consumedValues)

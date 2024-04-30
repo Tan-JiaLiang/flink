@@ -64,4 +64,23 @@ public interface SourceOutput<T> extends WatermarkOutput {
      * @param timestamp the timestamp of the record.
      */
     void collect(T record, long timestamp);
+
+    /**
+     * Emit a record with a timestamp and pass its fetchTime.
+     *
+     * <p>Use this method if you capture the fetchTime and the source system has timestamps attached
+     * to records. Typical examples would be Logs, PubSubs, or Message Queues, like Kafka or
+     * Kinesis, which store a timestamp with each event. If the source system does not have a notion
+     * of records with timestamps, use {@link TimestampAssigner#NO_TIMESTAMP} instead.
+     *
+     * <p>The events typically still pass through a {@link TimestampAssigner}, which may decide to
+     * either use this source-provided timestamp, or replace it with a timestamp stored within the
+     * event (for example if the event was a JSON object one could configure aTimestampAssigner that
+     * extracts one of the object's fields and uses that as a timestamp).
+     *
+     * @param record the record to emit.
+     * @param timestamp the timestamp of the record.
+     * @param fetchTime the timestamp of the record fetched.
+     */
+    void collect(T record, long timestamp, long fetchTime);
 }
